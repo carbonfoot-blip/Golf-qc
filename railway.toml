@@ -1,10 +1,6 @@
 [build]
-builder = "nixpacks"
+builder = "dockerfile"
 
 [deploy]
-startCommand = "playwright install chromium --with-deps && uvicorn main:app --host 0.0.0.0 --port $PORT"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-
-[environments.production]
-watchPatterns = ["*.py", "*.json", "*.html"]
