@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Base de données locale
+alerts.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Variables d'environnement (contient les clés Twilio!)
+.env
+
+# Playwright
+playwright/.local-chromium/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
