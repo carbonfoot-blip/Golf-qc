@@ -2,7 +2,7 @@
 main.py — Application FastAPI pour golf-alert.
 
 Fonctionne dans deux contextes :
-  - Local (C:\Golf\)         : python main.py
+  - Local (C:/Golf/)         : python main.py
   - Railway (racine du repo) : uvicorn main:app --host 0.0.0.0 --port $PORT
 
 Routes :
