@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Golf Alert QC — Mes alertes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --green-900: #1a3a1f; --green-700: #2d5a35; --green-500: #3d7a47;
+      --green-300: #7ab885; --green-100: #d4ead7; --green-50: #eef7ef;
+      --sand: #f5f0e8; --sand-dark: #e8dfc8;
+      --amber: #c8860a; --amber-light: #fdf3dc;
+      --red: #c0392b; --red-light: #fdf0ef;
+      --text: #1a3a1f; --text-muted: #5a7060; --white: #ffffff;
+      --shadow-sm: 0 1px 3px rgba(26,58,31,.08);
+      --shadow: 0 4px 16px rgba(26,58,31,.10);
+      --radius: 12px;
+    }
+    body { font-family: 'DM Sans', sans-serif; background: var(--sand); color: var(--text); min-height: 100vh; }
+
+    header {
+      background: var(--green-900); padding: 0 2rem;
+      display: flex; align-items: center; justify-content: space-between; height: 64px;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo-icon { width: 32px; height: 32px; background: var(--green-500); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .logo-text { font-family: 'DM Serif Display', serif; font-size: 1.25rem; color: var(--white); }
+    .logo-text span { color: var(--green-300); }
+    nav a { color: var(--green-100); text-decoration: none; font-size: .875rem; font-weight: 500; padding: .375rem .75rem; border-radius: 6px; transition: background .15s; }
+    nav a:hover { background: rgba(255,255,255,.1); }
+    nav a.active { color: white; background: var(--green-500); }
+
+    .page-header {
+      background: var(--green-900); padding: 2.5rem 2rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .page-header h1 { font-family: 'DM Serif Display', serif; color: white; font-size: 1.75rem; }
+    .page-header p { color: var(--green-100); font-size: .875rem; margin-top: .25rem; }
+
+    .stub-banner {
+      background: var(--amber-light); border-bottom: 2px solid var(--amber);
+      padding: .75rem 2rem; font-size: .85rem; color: #7a5000;
+      display: flex; align-items: center; gap: .5rem;
+    }
+
+    main { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+
+    /* ── Stats ── */
+    .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    .stat-card { background: var(--white); border-radius: var(--radius); padding: 1.25rem; box-shadow: var(--shadow-sm); text-align: center; }
+    .stat-number { font-size: 2rem; font-weight: 700; color: var(--green-700); }
+    .stat-label { font-size: .75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; margin-top: .25rem; }
+
+    /* ── Alertes liste ── */
+    .alerts-list { display: flex; flex-direction: column; gap: 1rem; }
+
+    .alert-card {
+      background: var(--white); border-radius: var(--radius);
+      padding: 1.25rem 1.5rem; box-shadow: var(--shadow-sm);
+      border-left: 4px solid var(--green-300);
+      display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: start;
+    }
+    .alert-card.notifie { border-left-color: var(--amber); opacity: .75; }
+    .alert-card.inactif { border-left-color: #ccc; opacity: .5; }
+
+    .alert-terrain { font-weight: 600; font-size: 1rem; }
+    .alert-details { color: var(--text-muted); font-size: .85rem; margin-top: .375rem; display: flex; flex-wrap: wrap; gap: .5rem 1rem; }
+    .alert-detail { display: flex; align-items: center; gap: .3rem; }
+
+    .alert-status {
+      display: flex; align-items: center; gap: .375rem;
+      font-size: .75rem; font-weight: 600; padding: .25rem .75rem;
+      border-radius: 20px; margin-top: .5rem; align-self: flex-start;
+    }
+    .status-actif { background: var(--green-50); color: var(--green-700); }
+    .status-notifie { background: var(--amber-light); color: var(--amber); }
+    .status-inactif { background: var(--sand); color: var(--text-muted); }
+
+    .alert-actions { display: flex; flex-direction: column; gap: .5rem; align-items: flex-end; }
+    .btn-check {
+      background: var(--green-50); border: 1.5px solid var(--green-300);
+      color: var(--green-700); padding: .4rem .875rem;
+      border-radius: 8px; font-family: 'DM Sans', sans-serif;
+      font-size: .8rem; font-weight: 600; cursor: pointer; transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-check:hover { background: var(--green-100); }
+    .btn-delete {
+      background: transparent; border: 1.5px solid #ddd;
+      color: var(--text-muted); padding: .4rem .875rem;
+      border-radius: 8px; font-family: 'DM Sans', sans-serif;
+      font-size: .8rem; font-weight: 600; cursor: pointer; transition: all .15s;
+      white-space: nowrap;
+    }
+    .btn-delete:hover { background: var(--red-light); border-color: var(--red); color: var(--red); }
+
+    /* ── Logs ── */
+    .logs-section { margin-top: .875rem; padding-top: .875rem; border-top: 1px solid var(--sand-dark); }
+    .logs-toggle { font-size: .78rem; color: var(--text-muted); cursor: pointer; user-select: none; display: flex; align-items: center; gap: .3rem; }
+    .logs-toggle:hover { color: var(--text); }
+    .logs-list { margin-top: .5rem; display: none; }
+    .logs-list.open { display: block; }
+    .log-item {
+      font-size: .78rem; padding: .3rem 0; border-bottom: 1px solid var(--sand-dark);
+      display: flex; align-items: center; gap: .5rem; color: var(--text-muted);
+    }
+    .log-item:last-child { border-bottom: none; }
+    .log-badge { padding: .1rem .4rem; border-radius: 4px; font-size: .7rem; font-weight: 600; flex-shrink: 0; }
+    .log-badge.TROUVE, .log-badge.TROUVE_MOCK { background: var(--green-50); color: var(--green-700); }
+    .log-badge.VIDE { background: var(--sand); color: var(--text-muted); }
+    .log-badge.ERREUR { background: var(--red-light); color: var(--red); }
+
+    /* ── Vide ── */
+    .empty-state { text-align: center; padding: 4rem 2rem; color: var(--text-muted); }
+    .empty-icon { font-size: 3rem; margin-bottom: 1rem; }
+    .empty-state h3 { font-family: 'DM Serif Display', serif; color: var(--text); margin-bottom: .5rem; }
+    .btn-create { display: inline-block; margin-top: 1rem; background: var(--green-700); color: white; text-decoration: none; padding: .75rem 1.5rem; border-radius: 8px; font-weight: 600; transition: background .15s; }
+    .btn-create:hover { background: var(--green-900); }
+
+    .loading { display: flex; align-items: center; justify-content: center; gap: .75rem; padding: 3rem; color: var(--text-muted); }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--green-100); border-top-color: var(--green-500); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--green-900); color: white; padding: .875rem 1.25rem; border-radius: 10px; font-size: .875rem; font-weight: 500; box-shadow: var(--shadow); z-index: 200; transform: translateY(100px); opacity: 0; transition: transform .3s, opacity .3s; max-width: 320px; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.error { background: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="/">
+    <div class="logo-icon">⛳</div>
+    <span class="logo-text">Golf<span>Alert</span> QC</span>
+  </a>
+  <nav>
+    <a href="/">Recherche</a>
+    <a href="/alerts" class="active">Mes alertes</a>
+  </nav>
+</header>
+
+<div class="page-header">
+  <div>
+    <h1>Mes alertes SMS</h1>
+    <p>Surveillance automatique des départs disponibles</p>
+  </div>
+</div>
+
+<div class="stub-banner" id="stub-banner" style="display:none">
+  ⚠️ Mode développement — les SMS sont affichés dans les logs du serveur, pas envoyés. Configurer Twilio dans <code>.env</code> pour l'envoi réel.
+</div>
+
+<main>
+  <div class="stats-row" id="stats-row">
+    <div class="stat-card"><div class="stat-number" id="stat-actives">—</div><div class="stat-label">Alertes actives</div></div>
+    <div class="stat-card"><div class="stat-number" id="stat-notifiees">—</div><div class="stat-label">Notifications envoyées</div></div>
+    <div class="stat-card"><div class="stat-number" id="stat-terrains">—</div><div class="stat-label">Terrains surveillés</div></div>
+  </div>
+
+  <div id="alerts-container">
+    <div class="loading"><div class="spinner"></div>Chargement des alertes…</div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'http://127.0.0.1:8000/api';
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Détecter le mode stub
+  fetch(`${API}/courses`).then(() => {
+    document.getElementById('stub-banner').style.display = 'flex';
+  }).catch(() => {});
+
+  chargerAlertes();
+  setInterval(chargerAlertes, 30000); // Refresh auto toutes les 30s
+});
+
+async function chargerAlertes() {
+  try {
+    const res = await fetch(`${API}/alerts`);
+    const alertes = await res.json();
+
+    // Stats
+    const actives = alertes.filter(a => a.actif && !a.notifie).length;
+    const notifiees = alertes.filter(a => a.notifie).length;
+    const terrains = new Set(alertes.map(a => a.terrain_id)).size;
+    document.getElementById('stat-actives').textContent = actives;
+    document.getElementById('stat-notifiees').textContent = notifiees;
+    document.getElementById('stat-terrains').textContent = terrains;
+
+    afficherAlertes(alertes);
+  } catch(e) {
+    document.getElementById('alerts-container').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⚠️</div>
+        <h3>Serveur inaccessible</h3>
+        <p>Assurez-vous que le backend tourne sur <code>http://127.0.0.1:8000</code></p>
+        <p style="margin-top:.5rem;font-size:.8rem">Commande : <code>cd backend && python main.py</code></p>
+      </div>`;
+  }
+}
+
+function afficherAlertes(alertes) {
+  const container = document.getElementById('alerts-container');
+
+  if (alertes.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🔔</div>
+        <h3>Aucune alerte pour l'instant</h3>
+        <p>Créez une alerte depuis la page de recherche pour être notifié dès qu'un départ se libère.</p>
+        <a class="btn-create" href="/">Rechercher un départ</a>
+      </div>`;
+    return;
+  }
+
+  const html = alertes.map(a => carteAlerteHTML(a)).join('');
+  container.innerHTML = `<div class="alerts-list">${html}</div>`;
+}
+
+function carteAlerteHTML(a) {
+  const dateF = new Date(a.date + 'T12:00').toLocaleDateString('fr-CA', {
+    weekday: 'long', day: 'numeric', month: 'long'
+  });
+
+  let statusClass = 'status-actif';
+  let statusLabel = '● Surveillance active';
+  let cardClass = '';
+
+  if (a.notifie) {
+    statusClass = 'status-notifie';
+    statusLabel = '✓ Notifié';
+    cardClass = 'notifie';
+  } else if (!a.actif) {
+    statusClass = 'status-inactif';
+    statusLabel = '○ Désactivé';
+    cardClass = 'inactif';
+  }
+
+  const creeLeF = new Date(a.cree_le).toLocaleString('fr-CA', {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+  });
+
+  return `
+  <div class="alert-card ${cardClass}" id="alert-${a.id}">
+    <div>
+      <div class="alert-terrain">${a.terrain_nom}</div>
+      <div class="alert-details">
+        <span class="alert-detail">📅 ${dateF}</span>
+        <span class="alert-detail">🕐 ${a.heure_debut} – ${a.heure_fin}</span>
+        <span class="alert-detail">👥 ${a.nb_joueurs} joueur(s)</span>
+        <span class="alert-detail">📱 ${a.telephone}</span>
+        <span class="alert-detail">⏱ Toutes les ${a.intervalle} min</span>
+      </div>
+      <div class="alert-status ${statusClass}">${statusLabel}</div>
+      <div class="logs-section">
+        <div class="logs-toggle" onclick="toggleLogs(${a.id})">
+          ▶ Historique des vérifications
+        </div>
+        <div class="logs-list" id="logs-${a.id}">Chargement…</div>
+      </div>
+    </div>
+    <div class="alert-actions">
+      ${a.actif && !a.notifie
+        ? `<button class="btn-check" onclick="forcerCheck(${a.id})">🔍 Vérifier maintenant</button>`
+        : ''}
+      <button class="btn-delete" onclick="supprimerAlerte(${a.id})">Supprimer</button>
+    </div>
+  </div>`;
+}
+
+async function forcerCheck(alertId) {
+  try {
+    const res = await fetch(`${API}/check/${alertId}`, { method: 'POST' });
+    if (res.ok) {
+      afficherToast('✅ Vérification lancée — voir les logs du serveur');
+      setTimeout(chargerAlertes, 2000);
+    }
+  } catch(e) {
+    afficherToast('Erreur lors du check', true);
+  }
+}
+
+async function supprimerAlerte(alertId) {
+  if (!confirm('Supprimer cette alerte ?')) return;
+  try {
+    await fetch(`${API}/alerts/${alertId}`, { method: 'DELETE' });
+    afficherToast('Alerte supprimée');
+    chargerAlertes();
+  } catch(e) {
+    afficherToast('Erreur lors de la suppression', true);
+  }
+}
+
+const logsOuverts = new Set();
+
+async function toggleLogs(alertId) {
+  const el = document.getElementById(`logs-${alertId}`);
+  if (logsOuverts.has(alertId)) {
+    el.classList.remove('open');
+    logsOuverts.delete(alertId);
+    return;
+  }
+
+  el.classList.add('open');
+  logsOuverts.add(alertId);
+
+  try {
+    const res = await fetch(`${API}/alerts/${alertId}/logs`);
+    const logs = await res.json();
+    if (logs.length === 0) {
+      el.innerHTML = '<div class="log-item" style="color:var(--text-muted)">Aucune vérification encore effectuée.</div>';
+      return;
+    }
+    el.innerHTML = logs.map(log => {
+      const dateF = new Date(log.verifie_le).toLocaleString('fr-CA', {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+      return `<div class="log-item">
+        <span class="log-badge ${log.statut}">${log.statut}</span>
+        <span>${dateF}</span>
+        ${log.details ? `<span style="color:var(--text-muted)">${log.details}</span>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="log-item">Erreur chargement logs</div>';
+  }
+}
+
+function afficherToast(message, isError = false) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.className = `toast show${isError ? ' error' : ''}`;
+  setTimeout(() => toast.className = 'toast', 3500);
+}
+</script>
+</body>
+</html>
