@@ -104,11 +104,7 @@ async def _scrape_gggolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs
         logger.info(f"[GGG] HTML reçu: {len(content)} chars")
 
         # Logger extrait pour debug
-        for keyword in ["teetime", "ttime", "departure", "depart", "booking"]:
-            idx = content.lower().find(keyword)
-            if idx > 0:
-                logger.info(f"[GGG] Trouvé '{keyword}' à {idx}: ...{content[max(0,idx-50):idx+300]}...")
-                break
+        logger.info(f"[GGG] HTML extrait (milieu): {content[5000:8000]}")
 
         return _parse_gggolf_results(content, terrain, date, heure_debut, heure_fin, nb_joueurs)
 
