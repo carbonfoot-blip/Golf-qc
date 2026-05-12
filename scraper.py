@@ -55,13 +55,19 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
         "Origin": "https://secure.gggolf.ca",
     }
 
-    payload = {
-        "date": date,
-        "hour": heure_h,
-        "minute": "00",
-        "nbplayers": str(nb_joueurs),
-        "search": "Chercher les départs",
-    }
+    # Essayer plusieurs formats d'heure (GGG varie selon le terrain)
+    heure_h_padded = heure_h.zfill(2)  # "07", "12" etc.
+
+    payloads_a_essayer = [
+        # Format observe sur Beloeil (fonctionne)
+        {"date": date, "hour": heure_h, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+        # Format avec heure paddee
+        {"date": date, "hour": heure_h_padded, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+        # Format avec nb_players au lieu de nbplayers
+        {"date": date, "hour": heure_h, "minute": "00", "nb_players": str(nb_joueurs), "search": "Chercher les départs"},
+        # Format avec heure de debut = 0 (toutes les heures)
+        {"date": date, "hour": "0", "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+    ]
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
@@ -86,20 +92,20 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
                     except Exception:
                         pass
 
-            # POST avec le payload exact du navigateur
-            resp = await client.post(url, data=payload, headers=headers)
-            logger.info(f"[GGG] POST {resp.status_code}: {len(resp.text)} chars")
+            # Essayer les differents payloads
+            for payload in payloads_a_essayer:
+                resp = await client.post(url, data=payload, headers=headers)
+                logger.info(f"[GGG] POST {resp.status_code}: {len(resp.text)} chars (hour={payload.get('hour')})")
 
-            if resp.status_code == 200 and len(resp.text) > 5000:
-                results = _parse_gggolf_html(resp.text, terrain, date, heure_debut, heure_fin, nb_joueurs)
-                if results:
-                    return results
+                if resp.status_code == 200 and len(resp.text) > 5000:
+                    results = _parse_gggolf_html(resp.text, terrain, date, heure_debut, heure_fin, nb_joueurs)
+                    if results:
+                        logger.info(f"[GGG] {len(results)} depart(s) avec payload hour={payload.get('hour')}")
+                        return results
 
-            # Fallback hoursAM/PM
-            if ggg_options:
-                return _parse_gggolf_from_options(ggg_options, terrain, date, heure_debut, heure_fin, nb_joueurs)
-
-            return _mock_tee_times(terrain, date, heure_debut, heure_fin)
+            # Aucun depart trouve — retourner liste vide (carte grisee dans l'UI)
+            logger.info(f"[GGG] Aucun depart trouve pour {terrain['nom']} — carte grisee")
+            return []
 
     except Exception as e:
         logger.error(f"[GGG] Erreur: {e}")
