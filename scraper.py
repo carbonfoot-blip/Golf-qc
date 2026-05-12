@@ -65,20 +65,9 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
             get_resp = await client.get(url, headers=headers)
             logger.info(f"[GGG] Cookies apres GET: {dict(client.cookies)}")
 
+            # On ignore calendarMin/calendarMax — ils representent la fenetre membres,
+            # pas la fenetre publique. On laisse le POST retourner les vrais resultats.
             ggg_options = _extract_ggg_options(get_resp.text)
-            if ggg_options:
-                cal_min = ggg_options.get("calendarMin")
-                cal_max = ggg_options.get("calendarMax")
-                logger.info(f"[GGG] fenetre: {cal_min} -> {cal_max}")
-                if cal_min and cal_max:
-                    try:
-                        target = datetime.strptime(date, "%Y-%m-%d").date()
-                        if not (datetime.strptime(cal_min, "%Y-%m-%d").date() <= target
-                                <= datetime.strptime(cal_max, "%Y-%m-%d").date()):
-                            logger.info(f"[GGG] Hors fenetre")
-                            return []
-                    except Exception:
-                        pass
 
             resp = None
             for payload in payloads:
