@@ -37,6 +37,7 @@ from database import (
 )
 from scheduler import start_scheduler, stop_scheduler
 from scraper import get_available_tee_times
+from booker import reserver_depart
 
 # ─── Logging ───────────────────────────────────────────
 logging.basicConfig(
@@ -115,6 +116,14 @@ class AlerteCreate(BaseModel):
             raise ValueError(f"Terrain '{v}' introuvable")
         return v
 
+class ReservationRequest(BaseModel):
+    terrain_id: str
+    confirm_url: str
+    username: str
+    password: str
+    date: str
+    heure: str
+    nb_joueurs: int
 
 # ─── Routes : Terrains ────────────────────────────────
 @app.get("/api/courses")
@@ -220,6 +229,23 @@ async def search_tee_times(
         ),
     }
 
+
+
+@app.post("/api/reserver")
+async def reserver(req: ReservationRequest):
+    if req.terrain_id not in COURSES_BY_ID:
+        raise HTTPException(status_code=404, detail="Terrain introuvable")
+    terrain = COURSES_BY_ID[req.terrain_id]
+    result = await reserver_depart(
+        terrain=terrain,
+        confirm_url=req.confirm_url,
+        username=req.username,
+        password=req.password,
+        date=req.date,
+        heure=req.heure,
+        nb_joueurs=req.nb_joueurs,
+    )
+    return result
 
 # ─── Routes : Alertes ─────────────────────────────────
 @app.post("/api/alerts", status_code=201)
