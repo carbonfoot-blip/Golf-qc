@@ -120,89 +120,92 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
                         "message": "Identifiants incorrects. Vérifiez votre nom d'utilisateur et mot de passe GGG Golf.",
                     }
 
-            logger.info(f"[Booker GGG] Login réussi, navigation vers confirm_url")
+            logger.info(f"[Booker GGG] Login reussi, navigation vers confirm_url: {confirm_url}")
 
-            # ── Étape 2 : Naviguer vers l'URL de confirmation ──
+            # ── Étape 2 : Naviguer vers la page de confirmation ──
+            # confirm_url = ...req=confirm&Keys=XXXXXX&NbHoles=18
             await page.goto(confirm_url, timeout=TIMEOUT, wait_until="domcontentloaded")
             await page.wait_for_load_state("networkidle", timeout=10000)
 
             content = await page.content()
             logger.info(f"[Booker GGG] Page confirmation: {len(content)} chars")
 
-            # ── Étape 3 : Confirmer la réservation ──────────
-            # GGG affiche un bouton de confirmation après navigation vers confirm_url
-            confirm_selectors = [
-                "input[name='confirm'], input[value*='Confirm'], input[value*='Réserver']",
-                "button:has-text('Confirmer'), button:has-text('Réserver')",
-                "input[type='submit'][value*='onfirm']",
-                ".btn-confirm, .btn-reserve, #confirm-btn",
-                "input[name='sConfirm']",
-            ]
+            # Verifier qu'on est bien sur la page de confirmation (pas une erreur)
+            if "req=confirm" not in page.url and "confirm" not in content.lower():
+                await browser.close()
+                return {
+                    "succes": False,
+                    "message": "Ce départ n'est plus disponible. Il a peut-être été pris entre temps.",
+                    "url_fallback": confirm_url,
+                }
 
-            confirm_btn = None
-            for sel in confirm_selectors:
-                confirm_btn = await page.query_selector(sel)
-                if confirm_btn:
-                    break
+            # ── Étape 3 : Cliquer "J'accepte les termes et je confirme ma réservation" ──
+            # Bouton GGG confirme: input[type="submit"] avec value="J'accepte les termes..."
+            confirm_btn = await page.query_selector(
+                "input[name='nook'], "
+                "input[value*='accepte'], input[value*='confirme'], "
+                "input[value*='J\'accepte'], "
+                "button:has-text('accepte'), button:has-text('confirme')"
+            )
+
+            if not confirm_btn:
+                # Chercher n'importe quel submit qui n'est pas "Faire une autre recherche"
+                all_submits = await page.query_selector_all("input[type='submit'], button[type='submit']")
+                for btn in all_submits:
+                    val = await btn.get_attribute("value") or await btn.inner_text()
+                    if val and "recherche" not in val.lower() and "cancel" not in val.lower():
+                        confirm_btn = btn
+                        break
 
             if confirm_btn:
+                btn_val = await confirm_btn.get_attribute("value") or ""
+                logger.info(f"[Booker GGG] Clic bouton confirmation: '{btn_val[:50]}'")
                 await confirm_btn.click()
-                await page.wait_for_load_state("networkidle", timeout=10000)
+                await page.wait_for_load_state("networkidle", timeout=15000)
                 final_content = await page.content()
+                logger.info(f"[Booker GGG] Page finale: {len(final_content)} chars")
 
-                # Vérifier si la réservation a réussi
+                # Verifier le succes
                 success_indicators = [
-                    "réservation confirmée",
-                    "booking confirmed",
-                    "confirmation",
-                    "réservé avec succès",
-                    "successfully booked",
-                    "votre réservation",
+                    "numero de reservation", "numéro de réservation",
+                    "reservation confirmee", "réservation confirmée",
+                    "confirmation number", "booking confirmed",
+                    "merci", "thank you",
                 ]
                 for indicator in success_indicators:
                     if indicator.lower() in final_content.lower():
                         await browser.close()
-                        logger.info(f"[Booker GGG] Réservation confirmée!")
+                        logger.info(f"[Booker GGG] SUCCES — indicateur: '{indicator}'")
                         return {
                             "succes": True,
-                            "message": "Réservation confirmée! Vous recevrez une confirmation par email.",
+                            "message": "Réservation confirmée! Vous recevrez une confirmation par courriel.",
                         }
 
-                # Si pas d'indicateur clair, on assume succès si pas d'erreur
-                error_indicators = ["erreur", "error", "impossible", "failed", "échec"]
+                # Verifier erreurs
+                error_indicators = ["erreur", "error", "impossible", "failed", "déjà", "already"]
                 for indicator in error_indicators:
                     if indicator.lower() in final_content.lower():
                         await browser.close()
                         return {
                             "succes": False,
                             "message": "Erreur lors de la confirmation. Le départ est peut-être déjà pris.",
+                            "url_fallback": confirm_url,
                         }
 
+                # Aucun indicateur clair — logger pour debug
+                logger.warning(f"[Booker GGG] Aucun indicateur clair. HTML[1000:2000]: {final_content[1000:2000]}")
                 await browser.close()
                 return {
                     "succes": True,
-                    "message": "Réservation soumise. Vérifiez votre email pour la confirmation.",
+                    "message": "Réservation soumise. Vérifiez votre courriel pour la confirmation.",
                 }
             else:
-                # Pas de bouton de confirmation trouvé
-                # Peut-être que la page confirm_url réserve directement
-                success_indicators = [
-                    "réservation confirmée", "booking confirmed",
-                    "confirmation", "réservé", "booked",
-                ]
-                for indicator in success_indicators:
-                    if indicator.lower() in content.lower():
-                        await browser.close()
-                        return {
-                            "succes": True,
-                            "message": "Réservation confirmée! Vérifiez votre email.",
-                        }
-
+                logger.warning(f"[Booker GGG] Bouton de confirmation non trouve")
+                logger.warning(f"[Booker GGG] HTML[500:1500]: {content[500:1500]}")
                 await browser.close()
-                logger.warning(f"[Booker GGG] Bouton de confirmation non trouvé")
                 return {
                     "succes": False,
-                    "message": "Impossible de finaliser la réservation. Essayez directement sur le site GGG Golf.",
+                    "message": "Impossible de trouver le bouton de confirmation. Essayez directement sur le site GGG Golf.",
                     "url_fallback": confirm_url,
                 }
 

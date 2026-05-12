@@ -128,20 +128,46 @@ def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
         logger.info(f"[GGG] Format 1 (teetimes_results-hour): {len(heures)} departs")
         return heures
 
-    # ── Format 2 : Madeleine/autogrid — tableau avec data-colno="1" pour l'heure ──
-    # Structure: <tr class="autogridEven/Odd"><td data-colno="0">...</td><td data-colno="1">10:08</td>...
-    autogrid_pattern = re.compile(
-        r'<tr[^>]*class="[^"]*autogrid[^"]*"[^>]*>.*?'
-        r'<td[^>]*data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*</td>',
+    # ── Format 2 : Madeleine/autogrid — tableau avec data-colno="0" (lien confirm) et data-colno="1" (heure) ──
+    # Structure:
+    #   <tr class="autogridEven">
+    #     <td data-colno="0"><a href="...req=confirm&Keys=XXXX&NbHoles=18" class="agIcn">...</a></td>
+    #     <td data-colno="1"> 13:12</td>
+    #   </tr>
+    autogrid_row_pattern = re.compile(
+        r'<tr[^>]*class="[^"]*autogrid(?:Even|Odd)[^"]*"[^>]*>(.*?)</tr>',
         re.DOTALL | re.IGNORECASE
     )
     results_autogrid = []
-    for m in autogrid_pattern.finditer(html):
-        h = _normalize_time(m.group(1).strip())
+    for row_m in autogrid_row_pattern.finditer(html):
+        row_html = row_m.group(1)
+
+        # Extraire l'URL de confirmation depuis data-colno="0"
+        confirm_match = re.search(
+            r'data-colno="0"[^>]*>.*?href="([^"]*req=confirm[^"]*)"[^>]*>',
+            row_html, re.DOTALL | re.IGNORECASE
+        )
+        confirm_url_row = confirm_match.group(1) if confirm_match else url_base
+
+        # Extraire l'heure depuis data-colno="1"
+        heure_match = re.search(
+            r'data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*</td>',
+            row_html, re.IGNORECASE
+        )
+        if not heure_match:
+            continue
+
+        h = _normalize_time(heure_match.group(1).strip())
         if h and _in_range(h, heure_debut, heure_fin):
-            results_autogrid.append({"heure": h, "places": nb_joueurs, "prix": "Voir site", "url": url_base})
+            results_autogrid.append({
+                "heure": h,
+                "places": nb_joueurs,
+                "prix": "Voir site",
+                "url": confirm_url_row,  # URL directe avec Keys=XXXX
+            })
+
     if results_autogrid:
-        logger.info(f"[GGG] Format 2 (autogrid): {len(results_autogrid)} departs")
+        logger.info(f"[GGG] Format 2 (autogrid): {len(results_autogrid)} departs avec URLs directes")
         return results_autogrid
 
     # ── Format 3 : fallback teetimes_results-hour sans data-confirm-url ──
