@@ -102,36 +102,13 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
             # Maintenant le POST avec les donnees du formulaire
             # Essayer differents noms de champs (varient selon les terrains GGG)
             for payload_variant in [
-                # Variant 1 — noms standards
+                # Payload exact observe dans le navigateur
                 {
                     "date": date,
-                    "heure": heure_h,
-                    "nbPlayers": str(nb_joueurs),
-                    "sSearch": "Chercher les departs",
-                    "option": "com_ggpublic",
-                    "req": "teetimes",
-                    "lang": "fr",
-                },
-                # Variant 2 — noms alternatifs
-                {
-                    "date": date,
-                    "heure": heure_h,
-                    "nb_players": str(nb_joueurs),
-                    "submit": "Chercher",
-                    "option": "com_ggpublic",
-                    "req": "teetimes",
-                    "lang": "fr",
-                },
-                # Variant 3 — avec les minutes
-                {
-                    "date": date,
-                    "heure": heure_h,
+                    "hour": heure_h,
                     "minute": "00",
-                    "nbPlayers": str(nb_joueurs),
-                    "sSearch": "Chercher les departs",
-                    "option": "com_ggpublic",
-                    "req": "teetimes",
-                    "lang": "fr",
+                    "nbplayers": str(nb_joueurs),
+                    "search": "Chercher les départs",
                 },
             ]:
                 resp = await client.post(url, data=payload_variant, headers=headers)
