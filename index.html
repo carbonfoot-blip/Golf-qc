@@ -110,9 +110,19 @@
     }
     .fields {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 1rem;
+      grid-template-columns: 1.2fr 1.4fr 1.8fr 1fr;
+      gap: 1.25rem;
       margin-bottom: 1rem;
+    }
+    @media (max-width: 700px) {
+      .fields {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    @media (max-width: 480px) {
+      .fields {
+        grid-template-columns: 1fr;
+      }
     }
     .field label {
       display: block;
@@ -143,6 +153,21 @@
       outline: none;
       border-color: var(--green-500);
       box-shadow: 0 0 0 3px rgba(61,122,71,.12);
+    }
+    .field-plage {
+      display: flex;
+      align-items: center;
+      gap: .375rem;
+    }
+    .field-plage input[type="time"] {
+      flex: 1;
+      min-width: 0;
+      padding: .625rem .5rem;
+    }
+    .field-plage-sep {
+      color: var(--text-muted);
+      font-size: .8rem;
+      flex-shrink: 0;
     }
 
     .field-row {
@@ -589,13 +614,10 @@
       </div>
       <div class="field">
         <label>Plage horaire</label>
-        <div class="field-row">
-          <div class="field">
-            <input type="time" id="inp-heure-debut" value="08:00"/>
-          </div>
-          <div class="field">
-            <input type="time" id="inp-heure-fin" value="12:00"/>
-          </div>
+        <div class="field-plage">
+          <input type="time" id="inp-heure-debut" value="08:00"/>
+          <span class="field-plage-sep">→</span>
+          <input type="time" id="inp-heure-fin" value="12:00"/>
         </div>
       </div>
       <div class="field">
