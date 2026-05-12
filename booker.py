@@ -126,7 +126,16 @@ async def _reserver_gggolf(
             )
             if submit_btn:
                 await submit_btn.click()
-                await page.wait_for_load_state("networkidle", timeout=15000)
+                # Attendre que le tableau de résultats apparaisse
+                try:
+                    await page.wait_for_selector(
+                        "#agTable, table.autogrid, .teetimes_results-lineblock, [class*='autogrid'], [class*='teetimes_results']",
+                        timeout=15000
+                    )
+                    logger.info(f"[Booker GGG] Tableau resultats apparu")
+                except PwTimeout:
+                    logger.warning(f"[Booker GGG] Tableau non apparu — attente fixe 4s")
+                    await page.wait_for_timeout(4000)
 
             search_content = await page.content()
             logger.info(f"[Booker GGG] Resultats recherche: {len(search_content)} chars — URL: {page.url}")
