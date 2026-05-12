@@ -1,22 +1,27 @@
 """
-scraper.py — GGG Golf charge les départs via AJAX après soumission du formulaire.
-On intercepte les réponses réseau pour capturer les données JSON.
+scraper.py — GGG Golf utilise un POST server-side.
+On envoie directement le POST avec httpx (plus rapide que Playwright pour ce cas).
+Les resultats sont dans le HTML de la reponse POST directe.
 """
 
 import logging
 import re
 import json
+import httpx
 from datetime import datetime, timedelta
 from typing import Optional
 from playwright.async_api import async_playwright, TimeoutError as PwTimeout
 
 logger = logging.getLogger(__name__)
 TIMEOUT = 30_000
+HTTP_TIMEOUT = 20
 
 
 async def get_available_tee_times(terrain, date, heure_debut, heure_fin, nb_joueurs):
     systeme = terrain.get("systeme", "site_propre")
     try:
+        if systeme == "gggolf":
+            return await _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
             context = await browser.new_context(
@@ -24,9 +29,7 @@ async def get_available_tee_times(terrain, date, heure_debut, heure_fin, nb_joue
                 locale="fr-CA",
             )
             page = await context.new_page()
-            if systeme == "gggolf":
-                results = await _scrape_gggolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs)
-            elif systeme == "chronogolf":
+            if systeme == "chronogolf":
                 results = await _scrape_chronogolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs)
             else:
                 results = await _scrape_generic(page, terrain, date, heure_debut, heure_fin, nb_joueurs)
@@ -37,226 +40,200 @@ async def get_available_tee_times(terrain, date, heure_debut, heure_fin, nb_joue
         return _mock_tee_times(terrain, date, heure_debut, heure_fin)
 
 
-async def _scrape_gggolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs):
+# ─────────────────────────────────────────────
+# GGG Golf — POST direct avec httpx
+# ─────────────────────────────────────────────
+
+async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs):
     slug = terrain.get("ggg_slug", terrain["id"])
     url = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
-    logger.info(f"[GGG] {terrain['nom']} — {date}")
+    logger.info(f"[GGG] POST direct: {terrain['nom']} — {date}")
 
-    captured_responses = []
-    captured_json = []
+    date_obj = datetime.strptime(date, "%Y-%m-%d")
+    heure_h = str(int(heure_debut.split(":")[0]))
 
-    async def handle_response(response):
-        resp_url = response.url
-        if any(k in resp_url for k in ["teetimes", "teetime", "req=", "task=", "ajax", "json"]):
-            try:
-                body = await response.body()
-                text = body.decode("utf-8", errors="ignore")
-                captured_responses.append({
-                    "url": resp_url,
-                    "status": response.status,
-                    "body": text[:2000],
-                })
-                try:
-                    data = json.loads(text)
-                    captured_json.append(data)
-                    logger.info(f"[GGG] JSON capturé: {str(data)[:300]}")
-                except Exception:
-                    pass
-            except Exception:
-                pass
+    # Payload POST identique a ce que le navigateur envoie
+    payload = {
+        "date": date,
+        "heure": heure_h,
+        "nbPlayers": str(nb_joueurs),
+        "sSearch": "Chercher les départs",
+        "option": "com_ggpublic",
+        "req": "teetimes",
+        "lang": "fr",
+    }
 
-    page.on("response", handle_response)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": url,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.8",
+        "Origin": "https://secure.gggolf.ca",
+    }
 
     try:
-        await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            # D'abord un GET pour obtenir les cookies de session
+            get_resp = await client.get(url, headers=headers)
+            logger.info(f"[GGG] GET initial: {get_resp.status_code}")
 
-        # Lire le JSON de config GGG (calendarMin, calendarMax, hoursAM, hoursPM)
-        content_initial = await page.content()
-        options_match = re.search(r'var options\s*=\s*(\{[^;]+\})', content_initial)
-        ggg_options = {}
-        if options_match:
-            try:
-                ggg_options = json.loads(options_match.group(1))
+            # Extraire les options GGG du HTML initial
+            ggg_options = _extract_ggg_options(get_resp.text)
+            if ggg_options:
                 logger.info(
                     f"[GGG] calendarMin={ggg_options.get('calendarMin')}, "
-                    f"calendarMax={ggg_options.get('calendarMax')}, "
-                    f"hoursAM={ggg_options.get('hoursAM')}, "
-                    f"hoursPM={ggg_options.get('hoursPM')}"
+                    f"calendarMax={ggg_options.get('calendarMax')}"
                 )
-            except Exception as e:
-                logger.warning(f"[GGG] Parse options: {e}")
+                # Verifier la fenetre de reservation
+                cal_min = ggg_options.get("calendarMin")
+                cal_max = ggg_options.get("calendarMax")
+                if cal_min and cal_max:
+                    try:
+                        target = datetime.strptime(date, "%Y-%m-%d").date()
+                        min_d = datetime.strptime(cal_min, "%Y-%m-%d").date()
+                        max_d = datetime.strptime(cal_max, "%Y-%m-%d").date()
+                        if not (min_d <= target <= max_d):
+                            logger.info(f"[GGG] Hors fenetre [{cal_min} -> {cal_max}]")
+                            return []
+                    except Exception:
+                        pass
 
-        # Vérifier la fenêtre de réservation
-        cal_min = ggg_options.get("calendarMin")
-        cal_max = ggg_options.get("calendarMax")
-        if cal_min and cal_max:
-            try:
-                date_obj = datetime.strptime(date, "%Y-%m-%d").date()
-                min_date = datetime.strptime(cal_min, "%Y-%m-%d").date()
-                max_date = datetime.strptime(cal_max, "%Y-%m-%d").date()
-                if not (min_date <= date_obj <= max_date):
-                    logger.info(f"[GGG] Date {date} hors fenêtre [{cal_min} -> {cal_max}]")
-                    return []
-            except Exception:
-                pass
+            # Maintenant le POST avec les donnees du formulaire
+            # Essayer differents noms de champs (varient selon les terrains GGG)
+            for payload_variant in [
+                # Variant 1 — noms standards
+                {
+                    "date": date,
+                    "heure": heure_h,
+                    "nbPlayers": str(nb_joueurs),
+                    "sSearch": "Chercher les departs",
+                    "option": "com_ggpublic",
+                    "req": "teetimes",
+                    "lang": "fr",
+                },
+                # Variant 2 — noms alternatifs
+                {
+                    "date": date,
+                    "heure": heure_h,
+                    "nb_players": str(nb_joueurs),
+                    "submit": "Chercher",
+                    "option": "com_ggpublic",
+                    "req": "teetimes",
+                    "lang": "fr",
+                },
+                # Variant 3 — avec les minutes
+                {
+                    "date": date,
+                    "heure": heure_h,
+                    "minute": "00",
+                    "nbPlayers": str(nb_joueurs),
+                    "sSearch": "Chercher les departs",
+                    "option": "com_ggpublic",
+                    "req": "teetimes",
+                    "lang": "fr",
+                },
+            ]:
+                resp = await client.post(url, data=payload_variant, headers=headers)
+                logger.info(f"[GGG] POST {resp.status_code}: {len(resp.text)} chars")
 
-        date_obj = datetime.strptime(date, "%Y-%m-%d")
+                if resp.status_code == 200 and len(resp.text) > 5000:
+                    results = _parse_gggolf_html(resp.text, terrain, date, heure_debut, heure_fin, nb_joueurs)
+                    if results:
+                        logger.info(f"[GGG] {len(results)} depat(s) trouves")
+                        return results
 
-        # Remplir la date
-        try:
-            date_input = await page.query_selector(
-                "input.jquery_ui_datepicker, input[name='date'], input[id='date'], "
-                "input[type='text'][name*='date']"
-            )
-            if date_input:
-                await date_input.fill(date)
-                await date_input.dispatch_event("change")
-                logger.info(f"[GGG] Date: {date}")
-        except Exception as e:
-            logger.warning(f"[GGG] Date: {e}")
+                    # Logger extrait pour debug
+                    idx = resp.text.lower().find("reservez")
+                    if idx < 0:
+                        idx = resp.text.lower().find("result")
+                    if idx > 0:
+                        logger.info(f"[GGG] Extrait HTML: {resp.text[max(0,idx-200):idx+500]}")
+                    else:
+                        logger.info(f"[GGG] HTML[3000:5000]: {resp.text[3000:5000]}")
 
-        # Remplir l'heure
-        try:
-            heure_h = str(int(heure_debut.split(":")[0]))
-            hour_sel = await page.query_selector(
-                "select[name='heure'], select[name='hour'], select[id='heure'], "
-                "select[name*='hour'], select[name*='heure']"
-            )
-            if hour_sel:
-                await hour_sel.select_option(value=heure_h)
-                logger.info(f"[GGG] Heure: {heure_h}h")
-        except Exception as e:
-            logger.warning(f"[GGG] Heure: {e}")
+            # Fallback: utiliser les hoursAM/PM du config
+            if ggg_options:
+                return _parse_gggolf_from_options(ggg_options, terrain, date, heure_debut, heure_fin, nb_joueurs)
 
-        # Remplir joueurs
-        try:
-            players_sel = await page.query_selector(
-                "select[name*='player'], select[name*='joueur'], select[name*='golfer'], "
-                "select[id*='player'], select[id*='joueur']"
-            )
-            if players_sel:
-                await players_sel.select_option(value=str(nb_joueurs))
-                logger.info(f"[GGG] Joueurs: {nb_joueurs}")
-        except Exception as e:
-            logger.warning(f"[GGG] Joueurs: {e}")
-
-        # Soumettre le formulaire
-        try:
-            submit = await page.query_selector(
-                "input[name='sSearch'], input[type='submit'], button[type='submit'], "
-                "button:has-text('Chercher'), input[value*='Chercher']"
-            )
-            if submit:
-                await submit.click()
-                logger.info("[GGG] Bouton Chercher clique")
-                # Attendre que les resultats apparaissent
-                try:
-                    await page.wait_for_selector(
-                        ".teetimes_results, .teetimes-results, #teetimes_results, "
-                        ".teetimes_results-header-hour, table.teetimes, "
-                        "[class*='teetimes_result']",
-                        timeout=12000
-                    )
-                    logger.info("[GGG] Resultats apparus dans le DOM")
-                except PwTimeout:
-                    logger.warning("[GGG] Selecteur resultats non trouve — attente 5s")
-                    await page.wait_for_timeout(5000)
-            else:
-                logger.warning("[GGG] Bouton submit non trouve")
-        except Exception as e:
-            logger.warning(f"[GGG] Submit: {e}")
-
-        content_final = await page.content()
-        logger.info(f"[GGG] HTML final: {len(content_final)} chars")
-
-        # Logger la section des resultats
-        idx = content_final.lower().find("teetimes_result")
-        if idx > 0:
-            logger.info(f"[GGG] Section resultats: {content_final[idx:idx+1000]}")
-        else:
-            logger.info(f"[GGG] Pas de section resultats — HTML[8000:11000]: {content_final[8000:11000]}")
-
-        # Essayer JSON d'abord
-        if captured_json:
-            results = _parse_gggolf_json(captured_json, terrain, date, heure_debut, heure_fin, nb_joueurs)
-            if results:
-                return results
-
-        # Sinon HTML
-        results = _parse_gggolf_html_final(content_final, terrain, date, heure_debut, heure_fin, nb_joueurs)
-        if results:
-            return results
-
-        # Fallback hoursAM/PM
-        if ggg_options:
-            return _parse_gggolf_from_options(ggg_options, terrain, date, heure_debut, heure_fin, nb_joueurs)
-
-        return _mock_tee_times(terrain, date, heure_debut, heure_fin)
+            return _mock_tee_times(terrain, date, heure_debut, heure_fin)
 
     except Exception as e:
-        logger.error(f"[GGG] Erreur: {e}")
+        logger.error(f"[GGG] Erreur POST: {e}")
         return _mock_tee_times(terrain, date, heure_debut, heure_fin)
 
 
-def _parse_gggolf_json(json_list, terrain, date, heure_debut, heure_fin, nb_joueurs):
-    slug = terrain.get("ggg_slug", terrain["id"])
-    url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
-    results = []
-    for data in json_list:
-        items = []
-        if isinstance(data, list):
-            items = data
-        elif isinstance(data, dict):
-            items = (data.get("teetimes") or data.get("data") or
-                    data.get("results") or data.get("times") or [])
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            time_val = (item.get("time") or item.get("heure") or
-                       item.get("start_time") or item.get("teeTime") or "")
-            h = _normalize_time(str(time_val))
-            if h and _in_range(h, heure_debut, heure_fin):
-                results.append({
-                    "heure": h,
-                    "places": item.get("available", item.get("spots", nb_joueurs)),
-                    "prix": str(item.get("price", item.get("prix", "Voir site"))),
-                    "url": url_base,
-                })
-    logger.info(f"[GGG] JSON parse: {len(results)} departs")
-    return results
+def _extract_ggg_options(html):
+    """Extraire le JSON de config GGG depuis le HTML."""
+    m = re.search(r'var options\s*=\s*(\{[^;]+\})', html)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
+    return {}
 
 
-def _parse_gggolf_html_final(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
+def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
+    """
+    Parser le HTML des resultats GGG.
+    Structure observee:
+      <td>Heure:</td><td>15:02</td>
+      ou
+      <td class="...heure...">15:02</td>
+    Avec bouton Reservez a cote.
+    """
     slug = terrain.get("ggg_slug", terrain["id"])
     url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
+
+    heures = set()
+
+    # Patterns bases sur la structure observee dans le screenshot
     patterns = [
+        # Heure dans une cellule de tableau apres "Heure:"
+        r'Heure[^<]*</td>\s*<td[^>]*>\s*(\d{1,2}:\d{2})',
+        r'Heure\s*:\s*</[^>]+>\s*<[^>]+>\s*(\d{1,2}:\d{2})',
+        # Classes CSS teetimes
         r'class="[^"]*ttime[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
         r'class="[^"]*teetime[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
-        r'class="[^"]*start[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
+        r'class="[^"]*hour[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
         r'class="[^"]*heure[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
+        # Attributs data
         r'data-time="(\d{1,2}:\d{2})"',
         r'data-heure="(\d{1,2}:\d{2})"',
-        r'"time"\s*:\s*"(\d{1,2}:\d{2})"',
-        r'<td[^>]*>\s*(\d{1,2}h\d{2})\s*</td>',
+        # Heures dans des <td> simples (filtrees par plage valide)
         r'<td[^>]*>\s*(\d{1,2}:\d{2})\s*</td>',
-        r'<li[^>]*>\s*(\d{1,2}:\d{2})\s*</li>',
+        r'<td[^>]*>\s*(\d{1,2}h\d{2})\s*</td>',
+        # Dans des liens de reservation
+        r'href="[^"]*heure[=_](\d{1,2}:\d{2})[^"]*"',
+        r'href="[^"]*time[=_](\d{1,2}%3A\d{2})[^"]*"',
     ]
-    heures = set()
+
     for pat in patterns:
         for m in re.finditer(pat, html, re.IGNORECASE):
-            raw = m.group(1).replace("h", ":")
+            raw = m.group(1).replace("%3A", ":").replace("h", ":")
             h = _normalize_time(raw)
+            # Filtrer les heures de golf valides (6h a 20h)
             if h and "06:00" <= h <= "20:00":
                 heures.add(h)
-    logger.info(f"[GGG] HTML final heures: {sorted(heures)}")
+
+    logger.info(f"[GGG] Heures parsees: {sorted(heures)}")
+
     results = []
     for heure in sorted(heures):
         if _in_range(heure, heure_debut, heure_fin):
-            results.append({"heure": heure, "places": nb_joueurs, "prix": "Voir site", "url": url_base})
+            results.append({
+                "heure": heure,
+                "places": nb_joueurs,
+                "prix": "Voir site",
+                "url": url_base,
+            })
+
     return results
 
 
 def _parse_gggolf_from_options(ggg_options, terrain, date, heure_debut, heure_fin, nb_joueurs):
+    """Fallback: heures configurees dans GGG (approximatif)."""
     slug = terrain.get("ggg_slug", terrain["id"])
     url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
     all_hours = ggg_options.get("hoursAM", []) + ggg_options.get("hoursPM", [])
@@ -264,11 +241,18 @@ def _parse_gggolf_from_options(ggg_options, terrain, date, heure_debut, heure_fi
     for h_str in all_hours:
         heure = f"{int(h_str):02d}:00"
         if _in_range(heure, heure_debut, heure_fin):
-            results.append({"heure": heure, "places": 4, "prix": "Voir site", "url": url_base, "_approx": True})
+            results.append({
+                "heure": heure, "places": 4, "prix": "Voir site",
+                "url": url_base, "_approx": True,
+            })
     if results:
         logger.info(f"[GGG] Fallback hoursAM/PM: {[r['heure'] for r in results]}")
     return results
 
+
+# ─────────────────────────────────────────────
+# Chronogolf
+# ─────────────────────────────────────────────
 
 async def _scrape_chronogolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs):
     slug = terrain.get("chronogolf_slug", terrain["id"])
@@ -309,6 +293,10 @@ async def _scrape_chronogolf(page, terrain, date, heure_debut, heure_fin, nb_jou
         return _mock_tee_times(terrain, date, heure_debut, heure_fin)
 
 
+# ─────────────────────────────────────────────
+# Generique
+# ─────────────────────────────────────────────
+
 async def _scrape_generic(page, terrain, date, heure_debut, heure_fin, nb_joueurs):
     try:
         await page.goto(terrain["url_scrape"], timeout=TIMEOUT, wait_until="domcontentloaded")
@@ -322,6 +310,10 @@ async def _scrape_generic(page, terrain, date, heure_debut, heure_fin, nb_joueur
     except Exception as e:
         return _mock_tee_times(terrain, date, heure_debut, heure_fin)
 
+
+# ─────────────────────────────────────────────
+# Utilitaires
+# ─────────────────────────────────────────────
 
 def _normalize_time(text):
     text = text.strip()
