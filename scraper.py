@@ -118,6 +118,10 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
                     results = _parse_gggolf_html(resp.text, terrain, date, heure_debut, heure_fin, nb_joueurs)
                     if results:
                         logger.info(f"[GGG] {len(results)} depat(s) trouves")
+			# Debug temporaire — logger le HTML autour du mot "Reservez"
+			idx = html.lower().find("serv")
+    			if idx > 0:
+        		logger.info(f"[GGG] HTML autour Reservez: {html[max(0,idx-300):idx+500]}")
                         return results
 
                     # Logger extrait pour debug
