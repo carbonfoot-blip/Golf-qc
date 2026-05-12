@@ -109,6 +109,7 @@ def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
     slug = terrain.get("ggg_slug", terrain["id"])
     url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
 
+    # ── Format 1 : Beloeil/standard — teetimes_results-hour avec data-confirm-url ──
     heures = []
     bloc_pattern = re.compile(
         r'data-confirm-url="([^"]+)"[^>]*>.*?teetimes_results-hour[^>]*>'
@@ -119,10 +120,27 @@ def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
         h = _normalize_time(m.group(2).strip())
         if h and _in_range(h, heure_debut, heure_fin):
             heures.append({"heure": h, "places": nb_joueurs, "prix": "Voir site", "url": m.group(1)})
-
     if heures:
+        logger.info(f"[GGG] Format 1 (teetimes_results-hour): {len(heures)} departs")
         return heures
 
+    # ── Format 2 : Madeleine/autogrid — tableau avec data-colno="1" pour l'heure ──
+    # Structure: <tr class="autogridEven/Odd"><td data-colno="0">...</td><td data-colno="1">10:08</td>...
+    autogrid_pattern = re.compile(
+        r'<tr[^>]*class="[^"]*autogrid[^"]*"[^>]*>.*?'
+        r'<td[^>]*data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*</td>',
+        re.DOTALL | re.IGNORECASE
+    )
+    results_autogrid = []
+    for m in autogrid_pattern.finditer(html):
+        h = _normalize_time(m.group(1).strip())
+        if h and _in_range(h, heure_debut, heure_fin):
+            results_autogrid.append({"heure": h, "places": nb_joueurs, "prix": "Voir site", "url": url_base})
+    if results_autogrid:
+        logger.info(f"[GGG] Format 2 (autogrid): {len(results_autogrid)} departs")
+        return results_autogrid
+
+    # ── Format 3 : fallback teetimes_results-hour sans data-confirm-url ──
     heure_pattern = re.compile(
         r'teetimes_results-hour[^>]*>.*?Heure:?</span>\s*(\d{1,2}:\d{2})',
         re.DOTALL | re.IGNORECASE
@@ -132,6 +150,8 @@ def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
         h = _normalize_time(m.group(1).strip())
         if h and _in_range(h, heure_debut, heure_fin):
             results.append({"heure": h, "places": nb_joueurs, "prix": "Voir site", "url": url_base})
+    if results:
+        logger.info(f"[GGG] Format 3 (teetimes_results-hour fallback): {len(results)} departs")
     return results
 
 
