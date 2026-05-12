@@ -1,6 +1,5 @@
 """
-scraper.py — GGG Golf POST direct avec httpx.
-Pattern HTML confirme: class="teetimes_results-hour col-sm-1"
+scraper.py — GGG Golf via POST httpx, Chronogolf via API REST httpx.
 """
 
 import logging
@@ -21,23 +20,18 @@ async def get_available_tee_times(terrain, date, heure_debut, heure_fin, nb_joue
     try:
         if systeme == "gggolf":
             return await _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-                locale="fr-CA",
-            )
-            page = await context.new_page()
-            if systeme == "chronogolf":
-                results = await _scrape_chronogolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs)
-            else:
-                results = await _scrape_generic(page, terrain, date, heure_debut, heure_fin, nb_joueurs)
-            await browser.close()
-            return results
+        elif systeme == "chronogolf":
+            return await _scrape_chronogolf_api(terrain, date, heure_debut, heure_fin, nb_joueurs)
+        else:
+            return await _scrape_generic_playwright(terrain, date, heure_debut, heure_fin, nb_joueurs)
     except Exception as e:
         logger.error(f"Erreur scraping {terrain['nom']}: {e}")
-        return _mock_tee_times(terrain, date, heure_debut, heure_fin)
+        return []
 
+
+# ─────────────────────────────────────────────
+# GGG Golf — POST direct httpx
+# ─────────────────────────────────────────────
 
 async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs):
     slug = terrain.get("ggg_slug", terrain["id"])
@@ -45,6 +39,7 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
     logger.info(f"[GGG] POST: {terrain['nom']} — {date}")
 
     heure_h = str(int(heure_debut.split(":")[0]))
+    heure_h_padded = heure_h.zfill(2)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
@@ -55,27 +50,18 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
         "Origin": "https://secure.gggolf.ca",
     }
 
-    # Essayer plusieurs formats d'heure (GGG varie selon le terrain)
-    heure_h_padded = heure_h.zfill(2)  # "07", "12" etc.
-
     payloads_a_essayer = [
-        # Format observe sur Beloeil (fonctionne)
         {"date": date, "hour": heure_h, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
-        # Format avec heure paddee
         {"date": date, "hour": heure_h_padded, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
-        # Format avec nb_players au lieu de nbplayers
         {"date": date, "hour": heure_h, "minute": "00", "nb_players": str(nb_joueurs), "search": "Chercher les départs"},
-        # Format avec heure de debut = 0 (toutes les heures)
         {"date": date, "hour": "0", "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
     ]
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
-            # GET initial pour les cookies de session
             get_resp = await client.get(url, headers=headers)
             logger.info(f"[GGG] GET: {get_resp.status_code}")
 
-            # Verifier la fenetre de reservation
             ggg_options = _extract_ggg_options(get_resp.text)
             if ggg_options:
                 cal_min = ggg_options.get("calendarMin")
@@ -92,7 +78,6 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
                     except Exception:
                         pass
 
-            # Essayer les differents payloads
             for payload in payloads_a_essayer:
                 resp = await client.post(url, data=payload, headers=headers)
                 logger.info(f"[GGG] POST {resp.status_code}: {len(resp.text)} chars (hour={payload.get('hour')})")
@@ -100,16 +85,15 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
                 if resp.status_code == 200 and len(resp.text) > 5000:
                     results = _parse_gggolf_html(resp.text, terrain, date, heure_debut, heure_fin, nb_joueurs)
                     if results:
-                        logger.info(f"[GGG] {len(results)} depart(s) avec payload hour={payload.get('hour')}")
+                        logger.info(f"[GGG] {len(results)} depart(s) trouves")
                         return results
 
-            # Aucun depart trouve — retourner liste vide (carte grisee dans l'UI)
-            logger.info(f"[GGG] Aucun depart trouve pour {terrain['nom']} — carte grisee")
+            logger.info(f"[GGG] Aucun depart pour {terrain['nom']}")
             return []
 
     except Exception as e:
         logger.error(f"[GGG] Erreur: {e}")
-        return _mock_tee_times(terrain, date, heure_debut, heure_fin)
+        return []
 
 
 def _extract_ggg_options(html):
@@ -123,22 +107,11 @@ def _extract_ggg_options(html):
 
 
 def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
-    """
-    Structure HTML confirmee par inspection:
-    <div class="teetimes_results-hour col-sm-1">
-        <span class="visible-xs">Heure:</span> 15:02
-    </div>
-
-    URL de reservation dans data-confirm-url:
-    data-confirm-url="...&id=XXXXX&nbholes=18&nbplayers=2"
-    """
     slug = terrain.get("ggg_slug", terrain["id"])
     url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
 
     heures = []
 
-    # Pattern principal confirme — extraire heure ET url de confirmation par bloc
-    # Chaque depart est dans un div avec data-confirm-url et contient teetimes_results-hour
     bloc_pattern = re.compile(
         r'data-confirm-url="([^"]+)"[^>]*>.*?teetimes_results-hour[^>]*>'
         r'.*?Heure:?</span>\s*(\d{1,2}:\d{2})',
@@ -147,110 +120,166 @@ def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
 
     for m in bloc_pattern.finditer(html):
         confirm_url = m.group(1)
-        heure_raw = m.group(2).strip()
-        h = _normalize_time(heure_raw)
+        h = _normalize_time(m.group(2).strip())
         if h and _in_range(h, heure_debut, heure_fin):
             heures.append({
                 "heure": h,
                 "places": nb_joueurs,
                 "prix": "Voir site",
-                "url": confirm_url,  # URL directe de reservation pour ce creneau
+                "url": confirm_url,
             })
 
     if heures:
-        logger.info(f"[GGG] {len(heures)} depart(s) avec URLs directes")
         return heures
 
-    # Fallback — juste extraire les heures sans URL specifique
+    # Fallback sans URL directe
     heure_pattern = re.compile(
         r'teetimes_results-hour[^>]*>.*?Heure:?</span>\s*(\d{1,2}:\d{2})',
         re.DOTALL | re.IGNORECASE
     )
-
     results = []
     for m in heure_pattern.finditer(html):
         h = _normalize_time(m.group(1).strip())
         if h and _in_range(h, heure_debut, heure_fin):
-            results.append({
-                "heure": h,
-                "places": nb_joueurs,
-                "prix": "Voir site",
-                "url": url_base,
-            })
+            results.append({"heure": h, "places": nb_joueurs, "prix": "Voir site", "url": url_base})
 
-    logger.info(f"[GGG] {len(results)} depart(s) trouves (fallback sans URL directe)")
     return results
 
 
-def _parse_gggolf_from_options(ggg_options, terrain, date, heure_debut, heure_fin, nb_joueurs):
-    slug = terrain.get("ggg_slug", terrain["id"])
-    url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
-    all_hours = ggg_options.get("hoursAM", []) + ggg_options.get("hoursPM", [])
-    results = []
-    for h_str in all_hours:
-        heure = f"{int(h_str):02d}:00"
-        if _in_range(heure, heure_debut, heure_fin):
-            results.append({
-                "heure": heure, "places": 4, "prix": "Voir site",
-                "url": url_base, "_approx": True,
-            })
-    if results:
-        logger.info(f"[GGG] Fallback hoursAM/PM: {[r['heure'] for r in results]}")
-    return results
+# ─────────────────────────────────────────────
+# Chronogolf — API REST directe avec httpx
+# ─────────────────────────────────────────────
 
-
-async def _scrape_chronogolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs):
+async def _scrape_chronogolf_api(terrain, date, heure_debut, heure_fin, nb_joueurs):
+    course_id = terrain.get("chronogolf_course_id")
     slug = terrain.get("chronogolf_slug", terrain["id"])
-    captured = []
 
-    async def handle(response):
-        if any(k in response.url for k in ["tee_times", "availability", "slots"]):
-            try:
-                captured.append(await response.json())
-            except Exception:
-                pass
+    if not course_id:
+        logger.warning(f"[Chrono] Pas de course_id pour {terrain['nom']} — carte grisee")
+        return []
 
-    page.on("response", handle)
+    logger.info(f"[Chrono] API: {terrain['nom']} — course_id={course_id} — {date}")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "fr-CA,fr;q=0.9",
+        "Referer": f"https://www.chronogolf.ca/club/{slug}",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    # Chronogolf supporte deux formats d'API selon la version du terrain
+    urls_a_essayer = [
+        # API v1 standard (course_id entier)
+        (
+            "https://www.chronogolf.ca/api/v1/tee_times",
+            {"date": date, "course_id": str(course_id), "nb_players": str(nb_joueurs), "nb_holes": "18"},
+        ),
+        # API v2 ou UUID
+        (
+            f"https://www.chronogolf.ca/api/v1/tee_times",
+            {"date": date, "course_id": str(course_id), "nb_players": str(nb_joueurs)},
+        ),
+        # Format alternatif avec club_id
+        (
+            "https://www.chronogolf.ca/api/v1/tee_times",
+            {"date": date, "club_id": str(course_id), "nb_players": str(nb_joueurs), "nb_holes": "18"},
+        ),
+    ]
+
     try:
-        await page.goto(
-            f"https://www.chronogolf.ca/club/{slug}?date={date}&nb_players={nb_joueurs}&lang=fr",
-            timeout=TIMEOUT, wait_until="networkidle"
-        )
-        if captured:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            # GET initial pour les cookies de session
+            await client.get(f"https://www.chronogolf.ca/club/{slug}", headers=headers)
+
+            for api_url, params in urls_a_essayer:
+                try:
+                    resp = await client.get(api_url, params=params, headers=headers)
+                    logger.info(f"[Chrono] {resp.status_code}: {len(resp.text)} chars — {resp.url}")
+
+                    if resp.status_code == 200 and resp.text.strip():
+                        data = resp.json()
+                        results = _parse_chronogolf_response(data, terrain, date, heure_debut, heure_fin, nb_joueurs)
+                        if results:
+                            return results
+                except Exception as e:
+                    logger.warning(f"[Chrono] Variant echoue: {e}")
+                    continue
+
+        logger.info(f"[Chrono] Aucun depart pour {terrain['nom']}")
+        return []
+
+    except Exception as e:
+        logger.error(f"[Chrono] Erreur: {e}")
+        return []
+
+
+def _parse_chronogolf_response(data, terrain, date, heure_debut, heure_fin, nb_joueurs):
+    slug = terrain.get("chronogolf_slug", terrain["id"])
+    url_base = f"https://www.chronogolf.ca/club/{slug}"
+    results = []
+
+    slots = data if isinstance(data, list) else (
+        data.get("tee_times") or data.get("data") or data.get("slots") or []
+    )
+
+    for slot in slots:
+        start = slot.get("start_time") or slot.get("time") or slot.get("hour") or ""
+        # Format ISO: "2026-05-13T14:00:00" → "14:00"
+        if "T" in str(start):
+            start = str(start).split("T")[1][:5]
+        h = _normalize_time(str(start))
+        if not h or not _in_range(h, heure_debut, heure_fin):
+            continue
+
+        available = slot.get("available_spots", slot.get("spots", slot.get("nb_players_available", 4)))
+        if isinstance(available, int) and available < nb_joueurs:
+            continue
+
+        prix = slot.get("green_fee", slot.get("price", slot.get("rate", "Voir site")))
+        if isinstance(prix, (int, float)):
+            prix = f"{prix:.0f}$"
+
+        results.append({
+            "heure": h,
+            "places": available if isinstance(available, int) else 4,
+            "prix": str(prix),
+            "url": url_base,
+        })
+
+    logger.info(f"[Chrono] {len(results)} depart(s) pour {terrain['nom']}")
+    return results
+
+
+# ─────────────────────────────────────────────
+# Generique (site_propre) — Playwright
+# ─────────────────────────────────────────────
+
+async def _scrape_generic_playwright(terrain, date, heure_debut, heure_fin, nb_joueurs):
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            page = await (await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                locale="fr-CA",
+            )).new_page()
+            await page.goto(terrain["url_scrape"], timeout=TIMEOUT, wait_until="domcontentloaded")
+            content = await page.content()
+            await browser.close()
             results = []
-            for data in captured:
-                slots = data.get("tee_times") or data.get("slots") or (data if isinstance(data, list) else [])
-                for slot in slots:
-                    start = slot.get("start_time") or slot.get("time") or ""
-                    h = _normalize_time(str(start))
-                    if h and _in_range(h, heure_debut, heure_fin):
-                        results.append({
-                            "heure": h,
-                            "places": slot.get("available_spots", 4),
-                            "prix": "Voir site",
-                            "url": f"https://www.chronogolf.ca/club/{slug}?date={date}&nb_players={nb_joueurs}",
-                        })
-            if results:
-                return results
-        return _mock_tee_times(terrain, date, heure_debut, heure_fin)
+            for h_raw in set(re.findall(r'\b(\d{1,2}:\d{2})\b', content)):
+                h = _normalize_time(h_raw)
+                if h and _in_range(h, heure_debut, heure_fin):
+                    results.append({"heure": h, "places": 4, "prix": "Voir site", "url": terrain["url_reservation"]})
+            return sorted(results, key=lambda x: x["heure"])
     except Exception as e:
-        logger.error(f"[Chrono] {e}")
-        return _mock_tee_times(terrain, date, heure_debut, heure_fin)
+        logger.error(f"[Generic] {e}")
+        return []
 
 
-async def _scrape_generic(page, terrain, date, heure_debut, heure_fin, nb_joueurs):
-    try:
-        await page.goto(terrain["url_scrape"], timeout=TIMEOUT, wait_until="domcontentloaded")
-        content = await page.content()
-        results = []
-        for h_raw in set(re.findall(r'\b(\d{1,2}:\d{2})\b', content)):
-            h = _normalize_time(h_raw)
-            if h and _in_range(h, heure_debut, heure_fin):
-                results.append({"heure": h, "places": 4, "prix": "Voir site", "url": terrain["url_reservation"]})
-        return sorted(results, key=lambda x: x["heure"]) or _mock_tee_times(terrain, date, heure_debut, heure_fin)
-    except Exception as e:
-        return _mock_tee_times(terrain, date, heure_debut, heure_fin)
-
+# ─────────────────────────────────────────────
+# Utilitaires
+# ─────────────────────────────────────────────
 
 def _normalize_time(text):
     text = text.strip()

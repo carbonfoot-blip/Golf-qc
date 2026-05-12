@@ -11,7 +11,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.531, "lng": -73.518 }
+    "coordonnees": {
+      "lat": 45.531,
+      "lng": -73.518
+    }
   },
   {
     "id": "iles-boucherville",
@@ -25,7 +28,11 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.601, "lng": -73.438 }
+    "coordonnees": {
+      "lat": 45.601,
+      "lng": -73.438
+    },
+    "chronogolf_course_id": 1740
   },
   {
     "id": "boucherville",
@@ -39,7 +46,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.596, "lng": -73.450 }
+    "coordonnees": {
+      "lat": 45.596,
+      "lng": -73.45
+    }
   },
   {
     "id": "rive-sud",
@@ -53,7 +63,11 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.533, "lng": -73.283 }
+    "coordonnees": {
+      "lat": 45.533,
+      "lng": -73.283
+    },
+    "chronogolf_course_id": 22421
   },
   {
     "id": "saint-jean",
@@ -67,7 +81,10 @@
     "fenetreReservation": 3,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.308, "lng": -73.263 }
+    "coordonnees": {
+      "lat": 45.308,
+      "lng": -73.263
+    }
   },
   {
     "id": "vallee-des-forts",
@@ -81,7 +98,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.298, "lng": -73.275 }
+    "coordonnees": {
+      "lat": 45.298,
+      "lng": -73.275
+    }
   },
   {
     "id": "madeleine",
@@ -95,7 +115,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.588, "lng": -73.338 }
+    "coordonnees": {
+      "lat": 45.588,
+      "lng": -73.338
+    }
   },
   {
     "id": "seigneurie",
@@ -109,7 +132,11 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.420, "lng": -73.150 }
+    "coordonnees": {
+      "lat": 45.42,
+      "lng": -73.15
+    },
+    "chronogolf_course_id": "844bc3ef-34b2-4d54-a14b-f85f074113e8"
   },
   {
     "id": "saint-cesaire",
@@ -123,7 +150,11 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.418, "lng": -72.988 }
+    "coordonnees": {
+      "lat": 45.418,
+      "lng": -72.988
+    },
+    "chronogolf_course_id": 1451
   },
   {
     "id": "beloeil",
@@ -137,7 +168,10 @@
     "fenetreReservation": 4,
     "apex": true,
     "trous": 18,
-    "coordonnees": { "lat": 45.565, "lng": -73.205 }
+    "coordonnees": {
+      "lat": 45.565,
+      "lng": -73.205
+    }
   },
   {
     "id": "elmridge",
@@ -151,7 +185,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 36,
-    "coordonnees": { "lat": 45.508, "lng": -73.877 }
+    "coordonnees": {
+      "lat": 45.508,
+      "lng": -73.877
+    }
   },
   {
     "id": "anjou",
@@ -165,7 +202,10 @@
     "fenetreReservation": 3,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.590, "lng": -73.558 }
+    "coordonnees": {
+      "lat": 45.59,
+      "lng": -73.558
+    }
   },
   {
     "id": "blainvillier",
@@ -179,7 +219,10 @@
     "fenetreReservation": 6,
     "apex": true,
     "trous": 18,
-    "coordonnees": { "lat": 45.672, "lng": -73.878 }
+    "coordonnees": {
+      "lat": 45.672,
+      "lng": -73.878
+    }
   },
   {
     "id": "carling-lake",
@@ -193,7 +236,10 @@
     "fenetreReservation": 7,
     "apex": true,
     "trous": 18,
-    "coordonnees": { "lat": 45.875, "lng": -74.525 }
+    "coordonnees": {
+      "lat": 45.875,
+      "lng": -74.525
+    }
   },
   {
     "id": "balmoral",
@@ -207,7 +253,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.130, "lng": -74.608 }
+    "coordonnees": {
+      "lat": 46.13,
+      "lng": -74.608
+    }
   },
   {
     "id": "tremblant",
@@ -221,7 +270,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.118, "lng": -74.598 }
+    "coordonnees": {
+      "lat": 46.118,
+      "lng": -74.598
+    }
   },
   {
     "id": "oka",
@@ -235,7 +287,10 @@
     "fenetreReservation": 6,
     "apex": true,
     "trous": 18,
-    "coordonnees": { "lat": 45.470, "lng": -74.088 }
+    "coordonnees": {
+      "lat": 45.47,
+      "lng": -74.088
+    }
   },
   {
     "id": "laval-golf",
@@ -249,7 +304,10 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.618, "lng": -73.718 }
+    "coordonnees": {
+      "lat": 45.618,
+      "lng": -73.718
+    }
   },
   {
     "id": "longchamp",
@@ -263,7 +321,10 @@
     "fenetreReservation": 5,
     "apex": true,
     "trous": 18,
-    "coordonnees": { "lat": 45.815, "lng": -73.448 }
+    "coordonnees": {
+      "lat": 45.815,
+      "lng": -73.448
+    }
   },
   {
     "id": "joliette",
@@ -277,7 +338,10 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.022, "lng": -73.450 }
+    "coordonnees": {
+      "lat": 46.022,
+      "lng": -73.45
+    }
   },
   {
     "id": "vallons",
@@ -291,7 +355,10 @@
     "fenetreReservation": 6,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.308, "lng": -72.650 }
+    "coordonnees": {
+      "lat": 45.308,
+      "lng": -72.65
+    }
   },
   {
     "id": "knowlton",
@@ -305,7 +372,10 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.222, "lng": -72.515 }
+    "coordonnees": {
+      "lat": 45.222,
+      "lng": -72.515
+    }
   },
   {
     "id": "sherbrooke",
@@ -319,7 +389,10 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 45.402, "lng": -71.888 }
+    "coordonnees": {
+      "lat": 45.402,
+      "lng": -71.888
+    }
   },
   {
     "id": "ancienne-lorette",
@@ -333,7 +406,10 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.790, "lng": -71.373 }
+    "coordonnees": {
+      "lat": 46.79,
+      "lng": -71.373
+    }
   },
   {
     "id": "royal-quebec",
@@ -347,7 +423,10 @@
     "fenetreReservation": 7,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.905, "lng": -71.132 }
+    "coordonnees": {
+      "lat": 46.905,
+      "lng": -71.132
+    }
   },
   {
     "id": "grand-portneuf",
@@ -361,7 +440,10 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.754, "lng": -71.882 }
+    "coordonnees": {
+      "lat": 46.754,
+      "lng": -71.882
+    }
   },
   {
     "id": "levis",
@@ -375,7 +457,10 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.805, "lng": -71.252 }
+    "coordonnees": {
+      "lat": 46.805,
+      "lng": -71.252
+    }
   },
   {
     "id": "victoriaville",
@@ -389,6 +474,9 @@
     "fenetreReservation": 5,
     "apex": false,
     "trous": 18,
-    "coordonnees": { "lat": 46.058, "lng": -71.958 }
+    "coordonnees": {
+      "lat": 46.058,
+      "lng": -71.958
+    }
   }
 ]
