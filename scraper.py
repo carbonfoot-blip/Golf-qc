@@ -295,26 +295,36 @@ def _parse_chronogolf_teetimes(data, terrain, heure_debut, heure_fin, nb_joueurs
     url_base = f"https://www.chronogolf.ca/club/{slug}"
     results = []
 
-    # Chronogolf peut retourner plusieurs structures
+    # Chronogolf v2 retourne {"status": "open", "teetimes": [...]}
+    # Chronogolf v1 retourne une liste directe ou {"tee_times": [...]}
     slots = (
         data if isinstance(data, list) else
-        data.get("tee_times") or data.get("data") or
-        data.get("slots") or data.get("results") or []
+        data.get("teetimes") or data.get("tee_times") or
+        data.get("data") or data.get("slots") or data.get("results") or []
     )
 
+    # Logger les cles du premier slot pour debug
+    if slots and isinstance(slots[0], dict):
+        logger.info(f"[Chrono] Cles du slot: {list(slots[0].keys())}")
+
     for slot in slots:
-        # Extraire l'heure — format ISO ou HH:MM
+        # Extraire l'heure — plusieurs formats possibles
         start = (slot.get("start_time") or slot.get("time") or
-                 slot.get("hour") or slot.get("tee_time") or "")
+                 slot.get("hour") or slot.get("tee_time") or
+                 slot.get("start") or slot.get("departure_time") or "")
+
+        # Format ISO: "2026-05-13T14:00:00" ou "2026-05-13T14:00:00+00:00"
         if "T" in str(start):
             start = str(start).split("T")[1][:5]
+
         h = _normalize_time(str(start))
         if not h or not _in_range(h, heure_debut, heure_fin):
             continue
 
         # Places disponibles
         available = (slot.get("available_spots") or slot.get("spots") or
-                    slot.get("nb_players_available") or slot.get("availability") or 4)
+                    slot.get("nb_players_available") or slot.get("max_player_size") or
+                    slot.get("availability") or 4)
         if isinstance(available, int) and available < nb_joueurs:
             continue
 
