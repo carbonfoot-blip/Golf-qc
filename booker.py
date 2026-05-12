@@ -45,7 +45,7 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
     4. Confirmer la réservation
     """
     slug = terrain.get("ggg_slug", terrain["id"])
-    login_url = f"https://secure.gggolf.ca/{slug}/index.php?option=com_user&task=login&lang=fr"
+    login_url = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=user&lang=fr"
 
     logger.info(f"[Booker GGG] Réservation: {terrain['nom']} — {confirm_url}")
 
@@ -63,31 +63,16 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
             await page.goto(login_url, timeout=TIMEOUT, wait_until="domcontentloaded")
 
             # Chercher les champs login GGG
-            username_selectors = [
-                "input[name='username']",
-                "input[type='email']",
-                "input[id='username']",
-                "input[name='email']",
-                "#username", "#email",
-            ]
-            password_selectors = [
-                "input[name='password']",
-                "input[type='password']",
-                "input[id='password']",
-                "#password",
-            ]
+            # GGG Golf: name="email" et name="password" (confirme par inspection HTML)
+            username_field = await page.query_selector(
+                "input[name='email'], input[id='email'], input[name='username'], #username"
+            )
+            password_field = await page.query_selector(
+                "input[name='password'], input[type='password'], input[id='password'], #password"
+            )
 
-            username_field = None
-            for sel in username_selectors:
-                username_field = await page.query_selector(sel)
-                if username_field:
-                    break
-
-            password_field = None
-            for sel in password_selectors:
-                password_field = await page.query_selector(sel)
-                if password_field:
-                    break
+            logger.info(f"[Booker GGG] username_field trouve: {username_field is not None}")
+            logger.info(f"[Booker GGG] password_field trouve: {password_field is not None}")
 
             if not username_field or not password_field:
                 await browser.close()
@@ -100,14 +85,16 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
             await password_field.fill(password)
 
             # Soumettre le formulaire de login
+            # GGG Golf: bouton "Connexion"
             submit = await page.query_selector(
-                "input[type='submit'], button[type='submit'], "
-                "input[value*='Connexion'], button:has-text('Connexion'), "
-                "input[value*='Login'], button:has-text('Login')"
+                "button:has-text('Connexion'), input[value*='Connexion'], "
+                "button[type='submit'], input[type='submit']"
             )
             if submit:
+                logger.info(f"[Booker GGG] Clic sur bouton Connexion")
                 await submit.click()
             else:
+                logger.info(f"[Booker GGG] Bouton non trouve — Enter")
                 await page.keyboard.press("Enter")
 
             await page.wait_for_load_state("networkidle", timeout=10000)
