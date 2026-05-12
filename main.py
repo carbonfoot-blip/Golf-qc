@@ -1,20 +1,15 @@
 """
 main.py — Application FastAPI pour golf-alert.
 
-Fonctionne dans deux contextes :
-  - Local (C:/Golf/)         : python main.py
-  - Railway (racine du repo) : uvicorn main:app --host 0.0.0.0 --port $PORT
-
 Routes :
-  GET    /api/courses              — Liste des terrains
-  GET    /api/courses/regions      — Régions disponibles
-  GET    /api/courses/{id}         — Détail d'un terrain
-  GET    /api/search               — Recherche de départs disponibles
-  POST   /api/alerts               — Créer une alerte SMS
-  GET    /api/alerts               — Lister toutes les alertes
-  DELETE /api/alerts/{id}          — Supprimer une alerte
-  GET    /api/alerts/{id}/logs     — Logs de polling
-  POST   /api/check/{alert_id}     — Forcer un check immédiat
+  GET  /api/courses          — Liste des terrains (avec filtre région)
+  GET  /api/courses/{id}     — Détail d'un terrain
+  POST /api/alerts           — Créer une alerte SMS
+  GET  /api/alerts           — Lister toutes les alertes
+  DELETE /api/alerts/{id}    — Supprimer une alerte
+  GET  /api/alerts/{id}/logs — Logs de polling d'une alerte
+  POST /api/check/{alert_id} — Forcer un check immédiat
+  GET  /api/search           — Recherche de disponibilités (sans alerte)
 """
 
 import json
@@ -33,33 +28,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 
-# ─── Résolution des chemins (local plat OU Railway) ───
-# __file__ peut être C:\Golf\main.py ou /app/main.py
-BASE_DIR = Path(__file__).parent.resolve()
+# Charger .env
+load_dotenv(Path(__file__).parent.parent / ".env")
 
-# Chercher courses.json et le dossier frontend depuis BASE_DIR
-def _find_file(filename: str) -> Path:
-    """Cherche un fichier dans BASE_DIR ou ses sous-dossiers immédiats."""
-    direct = BASE_DIR / filename
-    if direct.exists():
-        return direct
-    # Chercher dans backend/ ou frontend/ si structure repo avec sous-dossiers
-    for sub in ["backend", "frontend"]:
-        candidate = BASE_DIR / sub / filename
-        if candidate.exists():
-            return candidate
-    return direct  # Retourne le chemin direct même s'il n'existe pas encore
-
-def _find_dir(dirname: str) -> Path:
-    """Cherche un dossier frontend ou backend."""
-    direct = BASE_DIR / dirname
-    if direct.exists():
-        return direct
-    return BASE_DIR  # Fallback : tout est dans BASE_DIR (local plat)
-
-# Charger .env (ignoré silencieusement si absent sur Railway)
-load_dotenv(BASE_DIR / ".env")
-load_dotenv(BASE_DIR / ".env.example")  # Fallback pour les valeurs par défaut
+from database import (
+    init_db, create_alert, get_all_alerts, get_active_alerts,
+    delete_alert, get_poll_logs,
+)
+from scheduler import start_scheduler, stop_scheduler
+from scraper import get_available_tee_times
 
 # ─── Logging ───────────────────────────────────────────
 logging.basicConfig(
@@ -69,19 +46,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("golf-alert")
 
-# ─── Import des modules locaux ─────────────────────────
-# Ajouter BASE_DIR au path pour que les imports fonctionnent
-# que les fichiers soient à plat ou dans backend/
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
-
-from database import init_db, create_alert, get_all_alerts, get_active_alerts, delete_alert, get_poll_logs
-from scheduler import start_scheduler, stop_scheduler
-from scraper import get_available_tee_times
-
 # ─── Données terrains ──────────────────────────────────
-COURSES_PATH = _find_file("courses.json")
-logger.info(f"courses.json : {COURSES_PATH}")
+COURSES_PATH = Path(__file__).parent / "courses.json"
 
 def load_courses() -> list[dict]:
     with open(COURSES_PATH, encoding="utf-8") as f:
@@ -90,7 +56,8 @@ def load_courses() -> list[dict]:
 COURSES = load_courses()
 COURSES_BY_ID = {c["id"]: c for c in COURSES}
 
-# ─── Lifespan ──────────────────────────────────────────
+
+# ─── Lifespan (startup / shutdown) ────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🏌️ Démarrage de golf-alert")
@@ -100,7 +67,8 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
     logger.info("Golf-alert arrêté")
 
-# ─── App ───────────────────────────────────────────────
+
+# ─── App ──────────────────────────────────────────────
 app = FastAPI(
     title="Golf Alert API",
     description="Réservation et alertes de départs de golf au Québec",
@@ -115,15 +83,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Modèles Pydantic ──────────────────────────────────
+
+# ─── Modèles Pydantic ─────────────────────────────────
 class AlerteCreate(BaseModel):
     terrain_id: str
-    date: str
-    heure_debut: str
-    heure_fin: str
-    nb_joueurs: int
-    telephone: str
-    intervalle: int = 15
+    date: str            # YYYY-MM-DD
+    heure_debut: str     # HH:MM
+    heure_fin: str       # HH:MM
+    nb_joueurs: int      # 1–4
+    telephone: str       # +1XXXXXXXXXX
+    intervalle: int = 15 # minutes
 
     @field_validator("nb_joueurs")
     @classmethod
@@ -146,14 +115,27 @@ class AlerteCreate(BaseModel):
             raise ValueError(f"Terrain '{v}' introuvable")
         return v
 
-# ─── Routes : Terrains ─────────────────────────────────
+
+class ReservationRequest(BaseModel):
+    terrain_id: str
+    confirm_url: str
+    username: str
+    password: str
+    date: str
+    heure: str
+    nb_joueurs: int
+
+
+# ─── Routes : Terrains ────────────────────────────────
 @app.get("/api/courses")
 async def get_courses(
     region: Optional[str] = None,
     systeme: Optional[str] = None,
     apex: Optional[bool] = None,
 ):
+    """Liste des terrains avec filtres optionnels."""
     results = COURSES
+
     if region:
         results = [c for c in results if c["region"].lower() == region.lower()]
     if systeme:
@@ -161,41 +143,49 @@ async def get_courses(
     if apex is not None:
         results = [c for c in results if c["apex"] == apex]
 
+    # Enrichir avec le statut de la fenêtre de réservation
     today = date.today()
     enriched = []
     for course in results:
         c = dict(course)
-        c["date_ouverture_max"] = (today + timedelta(days=course["fenetreReservation"])).isoformat()
+        fenetre = course["fenetreReservation"]
+        c["date_ouverture_max"] = (today + timedelta(days=fenetre)).isoformat()
         enriched.append(c)
+
     return enriched
 
 
 @app.get("/api/courses/regions")
 async def get_regions():
-    return sorted(set(c["region"] for c in COURSES))
+    """Liste des régions disponibles."""
+    regions = sorted(set(c["region"] for c in COURSES))
+    return regions
 
 
 @app.get("/api/courses/{course_id}")
 async def get_course(course_id: str):
+    """Détail d'un terrain."""
     if course_id not in COURSES_BY_ID:
         raise HTTPException(status_code=404, detail="Terrain introuvable")
     return COURSES_BY_ID[course_id]
 
 
-# ─── Routes : Recherche ────────────────────────────────
+# ─── Routes : Recherche ───────────────────────────────
 @app.get("/api/search")
 async def search_tee_times(
-    terrain_id: str = Query(...),
-    date: str = Query(...),
-    heure_debut: str = Query(...),
-    heure_fin: str = Query(...),
+    terrain_id: str = Query(..., description="ID du terrain"),
+    date: str = Query(..., description="Date YYYY-MM-DD"),
+    heure_debut: str = Query(..., description="Heure début HH:MM"),
+    heure_fin: str = Query(..., description="Heure fin HH:MM"),
     nb_joueurs: int = Query(default=2, ge=1, le=4),
 ):
+    """Recherche immédiate de départs disponibles (sans créer d'alerte)."""
     if terrain_id not in COURSES_BY_ID:
         raise HTTPException(status_code=404, detail="Terrain introuvable")
 
     terrain = COURSES_BY_ID[terrain_id]
 
+    # Vérifier la fenêtre de réservation
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
@@ -213,8 +203,12 @@ async def search_tee_times(
             "terrain": terrain,
             "disponible": False,
             "jours_avant_ouverture": jours_avant - fenetre,
+            "date_ouverture": (today_date + timedelta(days=fenetre - jours_avant + jours_avant)).isoformat(),
             "tee_times": [],
-            "message": f"La réservation ouvre dans {jours_avant - fenetre} jour(s)",
+            "message": (
+                f"La réservation pour {terrain['nom']} ouvre dans "
+                f"{jours_avant - fenetre} jour(s)"
+            ),
         }
 
     tee_times = await get_available_tee_times(
@@ -232,16 +226,18 @@ async def search_tee_times(
         "tee_times": tee_times,
         "message": (
             f"{len(tee_times)} départ(s) disponible(s)" if tee_times
-            else "Aucun départ dans cette plage"
+            else "Aucun départ disponible dans cette plage"
         ),
     }
 
 
-# ─── Routes : Alertes ──────────────────────────────────
+# ─── Routes : Alertes ─────────────────────────────────
 @app.post("/api/alerts", status_code=201)
 async def creer_alerte(alerte: AlerteCreate):
+    """Crée une nouvelle alerte SMS."""
     terrain = COURSES_BY_ID[alerte.terrain_id]
 
+    # Vérifier que la date n'est pas passée
     try:
         target_date = datetime.strptime(alerte.date, "%Y-%m-%d").date()
     except ValueError:
@@ -261,13 +257,18 @@ async def creer_alerte(alerte: AlerteCreate):
         intervalle=alerte.intervalle,
     )
 
-    logger.info(f"📲 Alerte #{alert_id} créée — {terrain['nom']} le {alerte.date}")
+    logger.info(
+        f"📲 Alerte #{alert_id} créée — {terrain['nom']} le {alerte.date} "
+        f"({alerte.heure_debut}–{alerte.heure_fin}), {alerte.nb_joueurs}j, "
+        f"tél: {alerte.telephone}, intervalle: {alerte.intervalle}min"
+    )
 
     return {
         "id": alert_id,
         "message": (
             f"Alerte créée. Vous serez notifié au {alerte.telephone} "
-            f"dès qu'un départ se libère au {terrain['nom']}."
+            f"dès qu'un départ se libère au {terrain['nom']} "
+            f"le {alerte.date} entre {alerte.heure_debut} et {alerte.heure_fin}."
         ),
         "terrain": terrain,
     }
@@ -275,60 +276,58 @@ async def creer_alerte(alerte: AlerteCreate):
 
 @app.get("/api/alerts")
 async def lister_alertes():
+    """Liste toutes les alertes."""
     return await get_all_alerts()
 
 
 @app.delete("/api/alerts/{alert_id}")
 async def supprimer_alerte(alert_id: int):
+    """Désactive une alerte."""
     await delete_alert(alert_id)
     return {"message": f"Alerte #{alert_id} supprimée"}
 
 
 @app.get("/api/alerts/{alert_id}/logs")
 async def logs_alerte(alert_id: int, limit: int = 20):
+    """Logs de polling d'une alerte."""
     return await get_poll_logs(alert_id, limit)
 
 
 @app.post("/api/check/{alert_id}")
 async def forcer_check(alert_id: int):
+    """Force un check immédiat pour une alerte (utile pour debug)."""
+    from database import get_active_alerts
     from scheduler import _check_single_alert
+
     alerts = await get_active_alerts()
     alert = next((a for a in alerts if a["id"] == alert_id), None)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte introuvable ou déjà notifiée")
+
     terrain = COURSES_BY_ID.get(alert["terrain_id"])
     if not terrain:
         raise HTTPException(status_code=404, detail="Terrain introuvable")
+
     await _check_single_alert(alert, terrain)
     return {"message": f"Check forcé pour alerte #{alert_id}"}
 
 
-# ─── Servir le frontend ────────────────────────────────
-# Cherche index.html dans BASE_DIR ou dans frontend/
-FRONTEND_DIR = _find_dir("frontend")
-INDEX_HTML = _find_file("index.html")
-ALERTS_HTML = _find_file("alerts.html")
+# ─── Servir le frontend ───────────────────────────────
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
-logger.info(f"Frontend : {FRONTEND_DIR}")
-
-# Servir les fichiers statiques (CSS, images éventuelles)
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
-@app.get("/")
-async def serve_index():
-    if INDEX_HTML.exists():
-        return FileResponse(str(INDEX_HTML))
-    return {"message": "Golf Alert API — voir /docs"}
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(str(FRONTEND_DIR / "index.html"))
 
-@app.get("/alerts")
-async def serve_alerts_page():
-    if ALERTS_HTML.exists():
-        return FileResponse(str(ALERTS_HTML))
-    raise HTTPException(status_code=404, detail="Page alertes introuvable")
+    @app.get("/alerts")
+    async def serve_alerts():
+        return FileResponse(str(FRONTEND_DIR / "alerts.html"))
 
 
-# ─── Démarrage direct ──────────────────────────────────
+# ─── Démarrage direct ─────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     host = os.getenv("API_HOST", "127.0.0.1")

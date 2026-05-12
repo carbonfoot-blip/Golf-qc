@@ -409,6 +409,17 @@
       gap: .25rem;
     }
     .tee-chip.mock { opacity: .7; border-style: dashed; }
+    .tee-chip.clickable {
+      cursor: pointer;
+      transition: background .15s, transform .1s, box-shadow .15s;
+    }
+    .tee-chip.clickable:hover {
+      background: var(--green-300);
+      border-color: var(--green-500);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(61,122,71,.2);
+    }
+    .chip-reserve-icon { font-size: .7rem; opacity: .6; }
     .tee-chip-price { font-weight: 400; color: var(--text-muted); font-size: .7rem; }
 
     .card-actions { display: flex; gap: .5rem; margin-top: auto; }
@@ -679,6 +690,48 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Modal réservation directe -->
+<div class="modal-overlay" id="modal-reservation">
+  <div class="modal">
+    <h3>Réserver ce départ</h3>
+    <p id="modal-resa-desc" style="color:var(--text-muted);font-size:.875rem;margin-bottom:1.25rem"></p>
+
+    <div id="modal-resa-form">
+      <div class="modal-field">
+        <label>Identifiant GGG Golf</label>
+        <input type="text" id="resa-username" placeholder="Votre nom d'utilisateur" autocomplete="username"/>
+      </div>
+      <div class="modal-field">
+        <label>Mot de passe</label>
+        <input type="password" id="resa-password" placeholder="Votre mot de passe" autocomplete="current-password"/>
+      </div>
+      <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:1rem;padding:.5rem .75rem;background:var(--sand);border-radius:6px;">
+        🔒 Vos identifiants ne sont jamais sauvegardés — utilisés uniquement pour cette réservation.
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="fermerModalReservation()">Annuler</button>
+        <button class="btn-confirm" id="btn-confirmer-resa" onclick="confirmerReservation()">⛳ Réserver maintenant</button>
+      </div>
+    </div>
+
+    <div id="modal-resa-loading" style="display:none;text-align:center;padding:1.5rem 0">
+      <div class="spinner" style="margin:0 auto .75rem"></div>
+      <p style="color:var(--text-muted);font-size:.875rem">Réservation en cours…<br><small>Cela peut prendre 20-30 secondes</small></p>
+    </div>
+
+    <div id="modal-resa-result" style="display:none;text-align:center;padding:1rem 0">
+      <div id="modal-resa-result-icon" style="font-size:2.5rem;margin-bottom:.75rem"></div>
+      <p id="modal-resa-result-msg" style="font-size:.9rem;margin-bottom:1rem"></p>
+      <div id="modal-resa-fallback" style="display:none;margin-bottom:1rem">
+        <a id="modal-resa-fallback-link" href="#" target="_blank" class="btn-reserve" style="display:inline-block">
+          Réserver sur le site GGG ↗
+        </a>
+      </div>
+      <button class="btn-cancel" onclick="fermerModalReservation()">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const API = 'https://golf-qc.up.railway.app/api';
 let allCourses = [];
@@ -859,9 +912,12 @@ function carteTerrainHTML(terrain, joueurs, date, heureDebut, heureFin, inApexSe
   let teeTimesHTML = '';
   if (teeTimes.length > 0) {
     const chips = teeTimes.slice(0, 8).map(t =>
-      `<span class="tee-chip ${t._mock ? 'mock' : ''}">
+      `<span class="tee-chip ${t._mock ? 'mock' : ''} ${!t._mock ? 'clickable' : ''}"
+        ${!t._mock ? `onclick="ouvrirModalReservation('${terrain.id}','${terrain.nom}','${date}','${t.heure}',${joueurs},'${encodeURIComponent(t.url)}')"` : ''}
+        title="${!t._mock ? 'Cliquer pour réserver' : 'Départ approximatif'}">
         ${t.heure}
         ${t.prix !== 'Voir site' ? `<span class="tee-chip-price">${t.prix}</span>` : ''}
+        ${!t._mock ? '<span class="chip-reserve-icon">→</span>' : ''}
       </span>`
     ).join('');
     const extra = teeTimes.length > 8 ? `<span style="font-size:.75rem;color:var(--text-muted)">+${teeTimes.length - 8} autres</span>` : '';
@@ -948,6 +1004,86 @@ async function confirmerAlerte() {
     }
   } catch(e) {
     afficherToast('Impossible de contacter le serveur', true);
+  }
+}
+
+// ── Modal réservation ────────────────────────────────
+let pendingReservation = null;
+
+function ouvrirModalReservation(terrainId, terrainNom, date, heure, joueurs, confirmUrlEncoded) {
+  const confirmUrl = decodeURIComponent(confirmUrlEncoded);
+  pendingReservation = { terrain_id: terrainId, confirm_url: confirmUrl, date, heure, nb_joueurs: joueurs };
+
+  const dateF = new Date(date + 'T12:00').toLocaleDateString('fr-CA', {
+    weekday: 'long', day: 'numeric', month: 'long'
+  });
+  document.getElementById('modal-resa-desc').textContent =
+    `${terrainNom} · ${dateF} · ${heure} · ${joueurs} joueur(s)`;
+
+  // Reset l'état du modal
+  document.getElementById('modal-resa-form').style.display = 'block';
+  document.getElementById('modal-resa-loading').style.display = 'none';
+  document.getElementById('modal-resa-result').style.display = 'none';
+  document.getElementById('resa-username').value = '';
+  document.getElementById('resa-password').value = '';
+
+  document.getElementById('modal-reservation').classList.add('open');
+}
+
+function fermerModalReservation() {
+  document.getElementById('modal-reservation').classList.remove('open');
+  pendingReservation = null;
+}
+
+async function confirmerReservation() {
+  if (!pendingReservation) return;
+
+  const username = document.getElementById('resa-username').value.trim();
+  const password = document.getElementById('resa-password').value.trim();
+
+  if (!username || !password) {
+    afficherToast('Veuillez entrer vos identifiants GGG Golf', true);
+    return;
+  }
+
+  // Afficher le loading
+  document.getElementById('modal-resa-form').style.display = 'none';
+  document.getElementById('modal-resa-loading').style.display = 'block';
+
+  try {
+    const res = await fetch(`${API}/reserver`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...pendingReservation,
+        username,
+        password,
+      }),
+    });
+
+    const data = await res.json();
+
+    // Afficher le résultat
+    document.getElementById('modal-resa-loading').style.display = 'none';
+    document.getElementById('modal-resa-result').style.display = 'block';
+
+    if (data.succes) {
+      document.getElementById('modal-resa-result-icon').textContent = '✅';
+      document.getElementById('modal-resa-result-msg').textContent = data.message;
+      document.getElementById('modal-resa-fallback').style.display = 'none';
+    } else {
+      document.getElementById('modal-resa-result-icon').textContent = '❌';
+      document.getElementById('modal-resa-result-msg').textContent = data.message;
+      if (data.url_fallback) {
+        document.getElementById('modal-resa-fallback').style.display = 'block';
+        document.getElementById('modal-resa-fallback-link').href = data.url_fallback;
+      }
+    }
+  } catch(e) {
+    document.getElementById('modal-resa-loading').style.display = 'none';
+    document.getElementById('modal-resa-result').style.display = 'block';
+    document.getElementById('modal-resa-result-icon').textContent = '❌';
+    document.getElementById('modal-resa-result-msg').textContent = 'Erreur de connexion au serveur.';
   }
 }
 
