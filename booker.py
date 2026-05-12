@@ -127,7 +127,14 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
 
                 hour_sel = await page.query_selector("select[name='hour'], select[name='heure']")
                 if hour_sel:
-                    await hour_sel.select_option(value=heure_val)
+                    # Essayer les deux formats: "8" et "08"
+                    try:
+                        await hour_sel.select_option(value=heure_val)
+                    except Exception:
+                        try:
+                            await hour_sel.select_option(value=heure_val.zfill(2))
+                        except Exception as e:
+                            logger.warning(f"[Booker GGG] Select heure echoue: {e}")
 
                 players_sel = await page.query_selector("select[name*='player'], select[name*='joueur']")
                 if players_sel:
