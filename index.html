@@ -605,6 +605,52 @@
     }
     .favoris-empty { color: var(--text-muted); font-size: .8rem; font-style: italic; }
 
+    /* Favoris inline sous le formulaire */
+    .favoris-inline {
+      border-top: 1px solid var(--sand-dark);
+      padding-top: .875rem;
+      margin-top: .25rem;
+    }
+    .favoris-inline-title {
+      font-size: .7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-muted);
+      margin-bottom: .5rem;
+    }
+    .favoris-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .375rem;
+    }
+    .favori-chip {
+      background: var(--green-50);
+      border: 1.5px solid var(--green-300);
+      color: var(--green-700);
+      border-radius: 20px;
+      padding: .3rem .875rem;
+      font-size: .78rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, transform .1s;
+      display: flex;
+      align-items: center;
+      gap: .375rem;
+      white-space: nowrap;
+    }
+    .favori-chip:hover {
+      background: var(--green-100);
+      transform: translateY(-1px);
+    }
+    .favori-chip-jour {
+      font-weight: 700;
+    }
+    .favori-chip-region {
+      font-size: .7rem;
+      opacity: .75;
+    }
+
     /* Bouton favoris dans la search card */
     .btn-favoris {
       background: transparent; border: 1.5px solid var(--green-300);
@@ -678,9 +724,15 @@
         Membres Apex Golf en priorité
       </label>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-        <button class="btn-favoris" onclick="ouvrirModalFavoris()">⭐ Mes favoris</button>
+        <button class="btn-favoris" onclick="ouvrirModalFavoris()">⭐ Gérer mes favoris</button>
         <button class="btn-search" onclick="lancerRecherche()">Rechercher les départs</button>
       </div>
+    </div>
+
+    <!-- Favoris inline -->
+    <div id="favoris-inline" class="favoris-inline" style="display:none">
+      <div class="favoris-inline-title">⭐ Mes favoris — cliquer pour appliquer</div>
+      <div class="favoris-chips" id="favoris-chips"></div>
     </div>
   </div>
 </div>
@@ -886,6 +938,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await chargerRegions();
   await chargerTerrains();
   mettreAJourStatusProfil();
+  afficherFavorisInline();
 });
 
 async function chargerRegions() {
@@ -1371,12 +1424,14 @@ function ajouterFavori() {
   localStorage.setItem(FAVORIS_KEY, JSON.stringify(favoris));
   afficherToast('✅ Favori ajouté');
   afficherListeFavoris();
+  afficherFavorisInline();
 }
 
 function supprimerFavori(id) {
   const favoris = getFavoris().filter(f => f.id !== id);
   localStorage.setItem(FAVORIS_KEY, JSON.stringify(favoris));
   afficherListeFavoris();
+  afficherFavorisInline();
 }
 
 function utiliserFavori(favori) {
@@ -1424,6 +1479,34 @@ function afficherListeFavoris() {
       <button class="favori-btn-del" onclick="supprimerFavori(${f.id})" title="Supprimer">✕</button>
     </div>
   `).join('') + '</div>';
+}
+
+function afficherFavorisInline() {
+  const favoris = getFavoris();
+  const container = document.getElementById('favoris-inline');
+  const chips = document.getElementById('favoris-chips');
+  if (!container || !chips) return;
+
+  if (favoris.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  chips.innerHTML = favoris.map(f => {
+    const jourNom = JOURS_FR[f.jour];
+    return `<button class="favori-chip" onclick="utiliserFavoriInline(${f.id})" title="${f.region} · ${jourNom} · ${f.debut}–${f.fin}">
+      <span class="favori-chip-jour">${jourNom}</span>
+      <span>${f.debut}–${f.fin}</span>
+      <span class="favori-chip-region">${f.region}</span>
+    </button>`;
+  }).join('');
+}
+
+function utiliserFavoriInline(id) {
+  const favoris = getFavoris();
+  const f = favoris.find(fav => fav.id === id);
+  if (f) utiliserFavori(f);
 }
 
 function ouvrirModalFavoris() {
