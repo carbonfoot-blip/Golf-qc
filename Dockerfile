@@ -11,14 +11,16 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Installer les dépendances Python EN PREMIER (couche cachée par Docker)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Installer Playwright une seule fois (couche cachée si requirements.txt ne change pas)
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN playwright install chromium
 
+# Copier le code EN DERNIER (couche qui change souvent)
 COPY . .
 
-RUN echo 'import os, subprocess, sys\nport = os.environ.get("PORT", "8000")\nsubprocess.run(["uvicorn", "main:app", "--host", "0.0.0.0", "--port", port])' > run.py
-
-CMD ["python", "run.py"]
+EXPOSE $PORT
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
