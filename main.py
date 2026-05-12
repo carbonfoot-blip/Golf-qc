@@ -321,7 +321,7 @@ async def serve_index():
         return FileResponse(str(INDEX_HTML))
     return {"message": "Golf Alert API — voir /docs"}
 
-@app.get("/alerts-page")
+@app.get("/alerts")
 async def serve_alerts_page():
     if ALERTS_HTML.exists():
         return FileResponse(str(ALERTS_HTML))
