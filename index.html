@@ -723,6 +723,42 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Modal Favoris -->
+<div class="modal-overlay" id="modal-favoris">
+  <div class="modal" style="max-width:520px">
+    <h3>⭐ Mes plages favorites</h3>
+    <p style="color:var(--text-muted);font-size:.8rem;margin-bottom:1.25rem">
+      Définissez vos créneaux habituels. Un clic applique automatiquement la plage au prochain jour correspondant.
+    </p>
+    <div id="favoris-list-container" style="margin-bottom:1.25rem"></div>
+    <div style="background:var(--sand);border-radius:10px;padding:1rem;margin-bottom:1rem">
+      <div style="font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:.75rem">Ajouter un favori</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem">
+        <div class="modal-field" style="margin:0"><label>Région</label><select id="fav-region"></select></div>
+        <div class="modal-field" style="margin:0"><label>Jour</label>
+          <select id="fav-jour">
+            <option value="1">Lundi</option>
+            <option value="2">Mardi</option>
+            <option value="3">Mercredi</option>
+            <option value="4">Jeudi</option>
+            <option value="5">Vendredi</option>
+            <option value="6" selected>Samedi</option>
+            <option value="0">Dimanche</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem">
+        <div class="modal-field" style="margin:0"><label>Heure début</label><input type="time" id="fav-debut" value="08:00"/></div>
+        <div class="modal-field" style="margin:0"><label>Heure fin</label><input type="time" id="fav-fin" value="12:00"/></div>
+      </div>
+      <button class="btn-confirm" style="width:100%;padding:.6rem" onclick="ajouterFavori()">+ Ajouter ce favori</button>
+    </div>
+    <div style="text-align:right">
+      <button class="btn-cancel" onclick="fermerModalFavoris()">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal confirmation réservation -->
 <div class="modal-overlay" id="modal-reservation">
   <div class="modal" style="max-width:460px">
