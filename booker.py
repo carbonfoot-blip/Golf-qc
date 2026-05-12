@@ -120,12 +120,15 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
                         "message": "Identifiants incorrects. Vérifiez votre nom d'utilisateur et mot de passe GGG Golf.",
                     }
 
-            logger.info(f"[Booker GGG] Login reussi, navigation vers confirm_url: {confirm_url}")
+            logger.info(f"[Booker GGG] Login reussi — URL actuelle: {page.url}")
+            logger.info(f"[Booker GGG] Navigation vers: {confirm_url}")
 
             # ── Étape 2 : Naviguer vers la page de confirmation ──
-            # confirm_url = ...req=confirm&Keys=XXXXXX&NbHoles=18
+            # Attendre un peu pour que la session soit bien etablie
+            await page.wait_for_timeout(1000)
             await page.goto(confirm_url, timeout=TIMEOUT, wait_until="domcontentloaded")
             await page.wait_for_load_state("networkidle", timeout=10000)
+            logger.info(f"[Booker GGG] URL apres navigation: {page.url}")
 
             content = await page.content()
             logger.info(f"[Booker GGG] Page confirmation: {len(content)} chars — URL: {page.url}")
@@ -144,12 +147,14 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
 
             # ── Étape 3 : Cliquer "J'accepte les termes et je confirme ma réservation" ──
             # Bouton GGG confirme: input[type="submit"] avec value="J'accepte les termes..."
-            confirm_btn = await page.query_selector(
-                "input[name='nook'], "
-                "input[value*='accepte'], input[value*='confirme'], "
-                "input[value*='J\'accepte'], "
-                "button:has-text('accepte'), button:has-text('confirme')"
-            )
+            # Utiliser des selecteurs sans apostrophe dans la valeur
+            confirm_btn = await page.query_selector("input[name='nook']")
+            if not confirm_btn:
+                confirm_btn = await page.query_selector("input[value*='accepte']")
+            if not confirm_btn:
+                confirm_btn = await page.query_selector("input[value*='confirme']")
+            if not confirm_btn:
+                confirm_btn = await page.query_selector("input[value*='Accepte']")
 
             if not confirm_btn:
                 # Chercher n'importe quel submit qui n'est pas "Faire une autre recherche"
