@@ -145,21 +145,43 @@ async def _scrape_gggolf(page, terrain, date, heure_debut, heure_fin, nb_joueurs
         except Exception as e:
             logger.warning(f"[GGG] Joueurs: {e}")
 
-        # Soumettre
+# Soumettre
+try:
+    submit = await page.query_selector(
+        "input[name='sSearch'], input[type='submit'], button[type='submit'], "
+        "button:has-text('Chercher'), input[value*='Chercher']"
+    )
+    if submit:
+        await submit.click()
+        logger.info("[GGG] Bouton Chercher cliqué")
+        
+        # Attendre que les résultats apparaissent dans le DOM
+        # GGG injecte les résultats dans un conteneur spécifique
         try:
-            submit = await page.query_selector(
-                "input[name='sSearch'], input[type='submit'], button[type='submit'], "
-                "button:has-text('Chercher'), input[value*='Chercher']"
+            await page.wait_for_selector(
+                ".teetimes_results, .teetimes-results, #teetimes_results, "
+                ".teetimes_results-header-hour, table.teetimes, "
+                "[class*='teetimes_result']",
+                timeout=12000
             )
-            if submit:
-                await submit.click()
-                logger.info("[GGG] Bouton Chercher cliqué")
-                # Attendre les appels AJAX (networkidle = plus d'activité réseau)
-                await page.wait_for_load_state("networkidle", timeout=15000)
-            else:
-                logger.warning("[GGG] Bouton submit non trouvé")
-        except Exception as e:
-            logger.warning(f"[GGG] Submit: {e}")
+            logger.info("[GGG] Résultats apparus dans le DOM")
+        except PwTimeout:
+            logger.warning("[GGG] Sélecteur résultats non trouvé — attente fixe 5s")
+            await page.wait_for_timeout(5000)
+    else:
+        logger.warning("[GGG] Bouton submit non trouvé")
+except Exception as e:
+    logger.warning(f"[GGG] Submit: {e}")
+
+content_final = await page.content()
+logger.info(f"[GGG] HTML final: {len(content_final)} chars")
+
+# Logger la section des résultats spécifiquement
+idx = content_final.lower().find("teetimes_result")
+if idx > 0:
+    logger.info(f"[GGG] Section résultats: {content_final[idx:idx+1000]}")
+else:
+    logger.info(f"[GGG] Pas de section résultats — HTML[8000:11000]: {content_final[8000:11000]}")
 
         # Logger toutes les réponses capturées
         logger.info(f"[GGG] {len(captured_responses)} réponses réseau capturées")
