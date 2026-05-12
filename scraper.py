@@ -79,6 +79,7 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
                     except Exception:
                         pass
 
+            resp = None
             for payload in payloads:
                 resp = await client.post(url, data=payload, headers=headers)
                 logger.info(f"[GGG] POST {resp.status_code}: {len(resp.text)} chars (hour={payload.get('hour')})")
@@ -88,6 +89,17 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
                         logger.info(f"[GGG] {len(results)} depart(s)")
                         return results
 
+            # Logger extrait HTML pour debug
+            if resp and len(resp.text) > 5000:
+                html = resp.text
+                # Chercher autogrid ou teetimes dans le HTML
+                for kw in ["autogrid", "teetimes_results", "data-colno", "agCol1"]:
+                    idx = html.lower().find(kw.lower())
+                    if idx > 0:
+                        logger.info(f"[GGG] Debug '{kw}' trouve a {idx}: {html[max(0,idx-50):idx+200]}")
+                        break
+                else:
+                    logger.info(f"[GGG] HTML[2000:3500]: {html[2000:3500]}")
             logger.info(f"[GGG] Aucun depart pour {terrain['nom']}")
             return []
     except Exception as e:
