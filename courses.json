@@ -356,57 +356,6 @@
     }
   },
   {
-    "id": "vallons",
-    "nom": "Club de golf Les Vallons",
-    "region": "Estrie",
-    "ville": "Bromont",
-    "systeme": "chronogolf",
-    "chronogolf_slug": "les-vallons",
-    "url_reservation": "https://www.chronogolf.ca/club/les-vallons",
-    "url_scrape": "https://www.chronogolf.ca/club/les-vallons",
-    "fenetreReservation": 6,
-    "apex": false,
-    "trous": 18,
-    "coordonnees": {
-      "lat": 45.308,
-      "lng": -72.65
-    }
-  },
-  {
-    "id": "knowlton",
-    "nom": "Knowlton Golf Club",
-    "region": "Estrie",
-    "ville": "Lac-Brome",
-    "systeme": "gggolf",
-    "ggg_slug": "knowlton",
-    "url_reservation": "https://secure.gggolf.ca/knowlton/index.php?option=com_ggpublic&req=teetimes&lang=fr",
-    "url_scrape": "https://secure.gggolf.ca/knowlton/index.php?option=com_ggpublic&req=teetimes&lang=fr",
-    "fenetreReservation": 5,
-    "apex": false,
-    "trous": 18,
-    "coordonnees": {
-      "lat": 45.222,
-      "lng": -72.515
-    }
-  },
-  {
-    "id": "sherbrooke",
-    "nom": "Club de golf de Sherbrooke",
-    "region": "Estrie",
-    "ville": "Sherbrooke",
-    "systeme": "gggolf",
-    "ggg_slug": "sherbrooke",
-    "url_reservation": "https://secure.gggolf.ca/sherbrooke/index.php?option=com_ggpublic&req=teetimes&lang=fr",
-    "url_scrape": "https://secure.gggolf.ca/sherbrooke/index.php?option=com_ggpublic&req=teetimes&lang=fr",
-    "fenetreReservation": 5,
-    "apex": false,
-    "trous": 18,
-    "coordonnees": {
-      "lat": 45.402,
-      "lng": -71.888
-    }
-  },
-  {
     "id": "ancienne-lorette",
     "nom": "Golf Ancienne-Lorette",
     "region": "Capitale-Nationale",
@@ -489,6 +438,201 @@
     "coordonnees": {
       "lat": 46.058,
       "lng": -71.958
+    }
+  },
+  {
+    "id": "chateau-bromont",
+    "nom": "Château Bromont",
+    "region": "Estrie",
+    "ville": "Bromont",
+    "systeme": "gggolf",
+    "ggg_slug": "chateaubromont",
+    "url_reservation": "https://secure.gggolf.ca/chateaubromont/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "url_scrape": "https://secure.gggolf.ca/chateaubromont/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.308,
+      "lng": -72.65
+    }
+  },
+  {
+    "id": "royal-bromont",
+    "nom": "Royal Bromont",
+    "region": "Estrie",
+    "ville": "Bromont",
+    "systeme": "gggolf",
+    "ggg_slug": "royalbromont",
+    "url_reservation": "https://secure.gggolf.ca/royalbromont/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "url_scrape": "https://secure.gggolf.ca/royalbromont/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.312,
+      "lng": -72.648
+    }
+  },
+  {
+    "id": "vieux-village",
+    "nom": "Golf Vieux Village",
+    "region": "Estrie",
+    "ville": "Bromont",
+    "systeme": "gggolf",
+    "ggg_slug": "vieuxvillage",
+    "url_reservation": "https://secure.gggolf.ca/vieuxvillage/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "url_scrape": "https://secure.gggolf.ca/vieuxvillage/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.315,
+      "lng": -72.645
+    }
+  },
+  {
+    "id": "venise",
+    "nom": "Golf Venise",
+    "region": "Estrie",
+    "ville": "Venise-en-Québec",
+    "systeme": "gggolf",
+    "ggg_slug": "venise",
+    "url_reservation": "https://secure.gggolf.ca/venise/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "url_scrape": "https://secure.gggolf.ca/venise/index.php?option=com_ggpublic&req=teetimes&lang=fr",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.075,
+      "lng": -73.112
+    }
+  },
+  {
+    "id": "granby-st-paul",
+    "nom": "Granby St-Paul",
+    "region": "Estrie",
+    "ville": "Granby",
+    "systeme": "chronogolf",
+    "chronogolf_slug": "granby-st-paul",
+    "url_reservation": "https://www.chronogolf.ca/fr/club/granby-st-paul",
+    "url_scrape": "https://www.chronogolf.ca/club/granby-st-paul",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.398,
+      "lng": -72.738
+    },
+    "chronogolf_club_id": 88,
+    "chronogolf_course_id": 1594,
+    "chronogolf_affiliation_id": 8,
+    "chronogolf_api_version": "v1"
+  },
+  {
+    "id": "mont-orford",
+    "nom": "Club de golf Mont-Orford",
+    "region": "Estrie",
+    "ville": "Orford",
+    "systeme": "chronogolf",
+    "chronogolf_slug": "mont-orford",
+    "url_reservation": "https://www.chronogolf.ca/fr/club/mont-orford",
+    "url_scrape": "https://www.chronogolf.ca/club/mont-orford",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.318,
+      "lng": -72.218
+    },
+    "chronogolf_club_id": 11,
+    "chronogolf_course_id": 20,
+    "chronogolf_affiliation_id": 6,
+    "chronogolf_api_version": "v1"
+  },
+  {
+    "id": "dufferin-heights",
+    "nom": "Golf Dufferin Heights",
+    "region": "Estrie",
+    "ville": "Stanstead",
+    "systeme": "chronogolf",
+    "chronogolf_slug": "golf-dufferin-heights",
+    "url_reservation": "https://www.chronogolf.ca/club/golf-dufferin-heights",
+    "url_scrape": "https://www.chronogolf.ca/club/golf-dufferin-heights",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.022,
+      "lng": -72.098
+    },
+    "chronogolf_club_id": 1427,
+    "chronogolf_course_id": 1654,
+    "chronogolf_affiliation_id": 6425,
+    "chronogolf_api_version": "v1",
+    "chronogolf_url_prefix": "marketplace"
+  },
+  {
+    "id": "owls-head",
+    "nom": "Club de golf Owl's Head",
+    "region": "Estrie",
+    "ville": "Mansonville",
+    "systeme": "chronogolf",
+    "chronogolf_slug": "owl-s-head",
+    "url_reservation": "https://www.chronogolf.ca/club/owl-s-head",
+    "url_scrape": "https://www.chronogolf.ca/club/owl-s-head",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.032,
+      "lng": -72.318
+    },
+    "chronogolf_club_id": 7,
+    "chronogolf_course_id": 10,
+    "chronogolf_affiliation_id": 68,
+    "chronogolf_api_version": "v1"
+  },
+  {
+    "id": "golf-waterloo",
+    "nom": "Golf Waterloo",
+    "region": "Estrie",
+    "ville": "Shefford",
+    "systeme": "chronogolf",
+    "chronogolf_slug": "golf-waterloo",
+    "url_reservation": "https://www.chronogolf.ca/fr/club/golf-waterloo",
+    "url_scrape": "https://www.chronogolf.ca/club/golf-waterloo",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.358,
+      "lng": -72.518
+    },
+    "chronogolf_club_id": 12,
+    "chronogolf_course_id": 21,
+    "chronogolf_affiliation_id": 23,
+    "chronogolf_api_version": "v1"
+  },
+  {
+    "id": "napoleon",
+    "nom": "Golf Napoléon (Waterloo)",
+    "region": "Estrie",
+    "ville": "Shefford",
+    "systeme": "chronogolf",
+    "chronogolf_slug": "golf-waterloo",
+    "chronogolf_club_id": 12,
+    "chronogolf_course_id": 22,
+    "chronogolf_affiliation_id": 23,
+    "chronogolf_api_version": "v1",
+    "url_reservation": "https://www.chronogolf.ca/fr/club/golf-waterloo",
+    "url_scrape": "https://www.chronogolf.ca/club/golf-waterloo",
+    "fenetreReservation": 7,
+    "apex": false,
+    "trous": 18,
+    "coordonnees": {
+      "lat": 45.36,
+      "lng": -72.52
     }
   }
 ]

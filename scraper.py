@@ -188,7 +188,9 @@ async def _scrape_chronogolf_v1(terrain, date, heure_debut, heure_fin, nb_joueur
 
     logger.info(f"[Chrono v1] {terrain['nom']} — club={club_id} course={course_id} — {date}")
 
-    url = f"https://www.chronogolf.ca/fr/marketplace/clubs/{club_id}/teetimes"
+    # Certains terrains utilisent /marketplace/ sans /fr/ (ex: Dufferin Heights)
+    url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
+    url = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
     params = {
         "date": date,
         "course_id": str(course_id),
