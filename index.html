@@ -603,6 +603,7 @@
   <nav>
     <a href="/" class="active">Recherche</a>
     <a href="/alerts">Mes alertes</a>
+    <button onclick="ouvrirProfil()" style="background:rgba(255,255,255,.1);border:none;color:var(--green-100);padding:.375rem .75rem;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.875rem;font-weight:500;margin-left:.25rem" id="btn-profil">👤 Profil</button>
   </nav>
 </header>
 
@@ -690,44 +691,113 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- Modal réservation directe -->
+<!-- Modal confirmation réservation -->
 <div class="modal-overlay" id="modal-reservation">
-  <div class="modal">
-    <h3>Réserver ce départ</h3>
-    <p id="modal-resa-desc" style="color:var(--text-muted);font-size:.875rem;margin-bottom:1.25rem"></p>
+  <div class="modal" style="max-width:460px">
 
-    <div id="modal-resa-form">
-      <div class="modal-field">
-        <label>Identifiant GGG Golf</label>
-        <input type="text" id="resa-username" placeholder="Votre nom d'utilisateur" autocomplete="username"/>
+    <!-- État: confirmation -->
+    <div id="modal-resa-confirm">
+      <h3>Confirmer la réservation</h3>
+      <div id="modal-resa-desc" style="background:var(--green-50);border:1.5px solid var(--green-300);border-radius:10px;padding:1rem 1.25rem;margin:1rem 0">
+        <div id="modal-resa-terrain" style="font-weight:600;font-size:1rem;color:var(--green-900)"></div>
+        <div id="modal-resa-details" style="color:var(--text-muted);font-size:.875rem;margin-top:.375rem"></div>
       </div>
-      <div class="modal-field">
-        <label>Mot de passe</label>
-        <input type="password" id="resa-password" placeholder="Votre mot de passe" autocomplete="current-password"/>
+
+      <!-- Credentials manquants -->
+      <div id="modal-resa-no-creds" style="display:none">
+        <div style="background:var(--amber-light);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:#7a5000;margin-bottom:1rem">
+          ⚠️ Aucun identifiant sauvegardé pour ce système. Entrez vos credentials ci-dessous ou sauvegardez-les dans votre <strong>Profil</strong>.
+        </div>
+        <div class="modal-field">
+          <label>Identifiant / Courriel</label>
+          <input type="text" id="resa-username-inline" placeholder="votre@email.com" autocomplete="username"/>
+        </div>
+        <div class="modal-field">
+          <label>Mot de passe</label>
+          <input type="password" id="resa-password-inline" placeholder="••••••••" autocomplete="current-password"/>
+        </div>
       </div>
-      <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:1rem;padding:.5rem .75rem;background:var(--sand);border-radius:6px;">
-        🔒 Vos identifiants ne sont jamais sauvegardés — utilisés uniquement pour cette réservation.
+
+      <div id="modal-resa-has-creds" style="display:none;font-size:.8rem;color:var(--green-700);margin-bottom:1rem;padding:.5rem .75rem;background:var(--green-50);border-radius:6px">
+        ✅ Identifiants sauvegardés — réservation en 1 clic
       </div>
+
       <div class="modal-actions">
         <button class="btn-cancel" onclick="fermerModalReservation()">Annuler</button>
-        <button class="btn-confirm" id="btn-confirmer-resa" onclick="confirmerReservation()">⛳ Réserver maintenant</button>
+        <button class="btn-confirm" onclick="confirmerReservation()">⛳ Réserver maintenant</button>
       </div>
     </div>
 
-    <div id="modal-resa-loading" style="display:none;text-align:center;padding:1.5rem 0">
-      <div class="spinner" style="margin:0 auto .75rem"></div>
-      <p style="color:var(--text-muted);font-size:.875rem">Réservation en cours…<br><small>Cela peut prendre 20-30 secondes</small></p>
+    <!-- État: chargement -->
+    <div id="modal-resa-loading" style="display:none;text-align:center;padding:2rem 0">
+      <div class="spinner" style="margin:0 auto 1rem"></div>
+      <p style="color:var(--text-muted);font-size:.875rem">Réservation en cours…</p>
+      <small style="color:var(--text-muted)">Cela peut prendre 20-30 secondes</small>
     </div>
 
-    <div id="modal-resa-result" style="display:none;text-align:center;padding:1rem 0">
-      <div id="modal-resa-result-icon" style="font-size:2.5rem;margin-bottom:.75rem"></div>
-      <p id="modal-resa-result-msg" style="font-size:.9rem;margin-bottom:1rem"></p>
+    <!-- État: résultat -->
+    <div id="modal-resa-result" style="display:none;text-align:center;padding:1.5rem 0">
+      <div id="modal-resa-result-icon" style="font-size:3rem;margin-bottom:.75rem"></div>
+      <p id="modal-resa-result-msg" style="font-size:.9rem;margin-bottom:1.25rem;line-height:1.5"></p>
       <div id="modal-resa-fallback" style="display:none;margin-bottom:1rem">
         <a id="modal-resa-fallback-link" href="#" target="_blank" class="btn-reserve" style="display:inline-block">
-          Réserver sur le site GGG ↗
+          Réserver sur le site ↗
         </a>
       </div>
       <button class="btn-cancel" onclick="fermerModalReservation()">Fermer</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal Profil / Credentials -->
+<div class="modal-overlay" id="modal-profil">
+  <div class="modal" style="max-width:500px">
+    <h3>Mon profil</h3>
+    <p style="color:var(--text-muted);font-size:.8rem;margin-bottom:1.25rem;padding:.625rem .75rem;background:var(--sand);border-radius:6px">
+      🔒 Vos identifiants sont chiffrés et stockés uniquement dans votre navigateur. Ils ne sont jamais envoyés à nos serveurs sauf lors d'une réservation.
+    </p>
+
+    <div style="margin-bottom:1.5rem">
+      <div style="font-weight:600;font-size:.875rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem">
+        <span class="badge badge-ggg">GGG Golf</span>
+        <span id="ggg-status" style="font-size:.75rem;color:var(--green-700)"></span>
+      </div>
+      <div class="modal-field">
+        <label>Identifiant / Courriel</label>
+        <input type="text" id="profil-ggg-user" placeholder="votre@email.com" autocomplete="username"/>
+      </div>
+      <div class="modal-field">
+        <label>Mot de passe</label>
+        <input type="password" id="profil-ggg-pwd" placeholder="••••••••" autocomplete="new-password"/>
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn-confirm" style="flex:1;padding:.5rem .875rem;font-size:.8rem" onclick="sauvegarderCredentials('ggg')">💾 Sauvegarder</button>
+        <button class="btn-cancel" style="padding:.5rem .875rem;font-size:.8rem" onclick="effacerCredentials('ggg')">🗑 Effacer</button>
+      </div>
+    </div>
+
+    <div style="margin-bottom:1.5rem">
+      <div style="font-weight:600;font-size:.875rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem">
+        <span class="badge badge-chrono">Chronogolf</span>
+        <span id="chrono-status" style="font-size:.75rem;color:var(--green-700)"></span>
+      </div>
+      <div class="modal-field">
+        <label>Identifiant / Courriel</label>
+        <input type="text" id="profil-chrono-user" placeholder="votre@email.com" autocomplete="username"/>
+      </div>
+      <div class="modal-field">
+        <label>Mot de passe</label>
+        <input type="password" id="profil-chrono-pwd" placeholder="••••••••" autocomplete="new-password"/>
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn-confirm" style="flex:1;padding:.5rem .875rem;font-size:.8rem" onclick="sauvegarderCredentials('chrono')">💾 Sauvegarder</button>
+        <button class="btn-cancel" style="padding:.5rem .875rem;font-size:.8rem" onclick="effacerCredentials('chrono')">🗑 Effacer</button>
+      </div>
+    </div>
+
+    <div style="text-align:right">
+      <button class="btn-cancel" onclick="fermerProfil()">Fermer</button>
     </div>
   </div>
 </div>
@@ -747,6 +817,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await chargerRegions();
   await chargerTerrains();
+  mettreAJourStatusProfil();
 });
 
 async function chargerRegions() {
@@ -913,7 +984,7 @@ function carteTerrainHTML(terrain, joueurs, date, heureDebut, heureFin, inApexSe
   if (teeTimes.length > 0) {
     const chips = teeTimes.slice(0, 8).map(t =>
       `<span class="tee-chip ${t._mock ? 'mock' : ''} ${!t._mock ? 'clickable' : ''}"
-        ${!t._mock ? `onclick="ouvrirModalReservation('${terrain.id}','${terrain.nom}','${date}','${t.heure}',${joueurs},'${encodeURIComponent(t.url)}')"` : ''}
+        ${!t._mock ? `onclick="ouvrirModalReservation('${terrain.id}','${terrain.nom}','${date}','${t.heure}',${joueurs},'${encodeURIComponent(t.url)}','${terrain.systeme}')"` : ''}
         title="${!t._mock ? 'Cliquer pour réserver' : 'Départ approximatif'}">
         ${t.heure}
         ${t.prix !== 'Voir site' ? `<span class="tee-chip-price">${t.prix}</span>` : ''}
@@ -1007,25 +1078,121 @@ async function confirmerAlerte() {
   }
 }
 
+// ── Credentials (localStorage) ───────────────────────
+const CREDS_KEY = 'golf_alert_creds';
+
+function getCredentials() {
+  try {
+    const raw = localStorage.getItem(CREDS_KEY);
+    return raw ? JSON.parse(raw) : { ggg: null, chrono: null };
+  } catch(e) {
+    return { ggg: null, chrono: null };
+  }
+}
+
+function sauvegarderCredentials(systeme) {
+  const userEl = document.getElementById(`profil-${systeme}-user`);
+  const pwdEl  = document.getElementById(`profil-${systeme}-pwd`);
+  const user   = userEl.value.trim();
+  const pwd    = pwdEl.value.trim();
+
+  if (!user || !pwd) {
+    afficherToast('Veuillez entrer identifiant et mot de passe', true);
+    return;
+  }
+
+  const creds = getCredentials();
+  creds[systeme] = { username: user, password: pwd };
+  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+
+  // Masquer le mot de passe après sauvegarde
+  pwdEl.value = '••••••••';
+  afficherToast(`✅ Identifiants ${systeme === 'ggg' ? 'GGG Golf' : 'Chronogolf'} sauvegardés`);
+  mettreAJourStatusProfil();
+}
+
+function effacerCredentials(systeme) {
+  const creds = getCredentials();
+  creds[systeme] = null;
+  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+  document.getElementById(`profil-${systeme}-user`).value = '';
+  document.getElementById(`profil-${systeme}-pwd`).value = '';
+  afficherToast(`Identifiants ${systeme === 'ggg' ? 'GGG Golf' : 'Chronogolf'} effacés`);
+  mettreAJourStatusProfil();
+}
+
+function mettreAJourStatusProfil() {
+  const creds = getCredentials();
+  const gggStatus    = document.getElementById('ggg-status');
+  const chronoStatus = document.getElementById('chrono-status');
+  if (gggStatus)    gggStatus.textContent    = creds.ggg    ? `✅ ${creds.ggg.username}`    : '○ Non configuré';
+  if (chronoStatus) chronoStatus.textContent = creds.chrono ? `✅ ${creds.chrono.username}` : '○ Non configuré';
+
+  // Mettre à jour le bouton profil dans le header
+  const btn = document.getElementById('btn-profil');
+  if (btn) {
+    const hasCreds = creds.ggg || creds.chrono;
+    btn.textContent = hasCreds ? '👤 Profil ✅' : '👤 Profil';
+  }
+}
+
+function ouvrirProfil() {
+  const creds = getCredentials();
+  // Pré-remplir si credentials existants
+  if (creds.ggg) {
+    document.getElementById('profil-ggg-user').value = creds.ggg.username;
+    document.getElementById('profil-ggg-pwd').value  = '••••••••';
+  }
+  if (creds.chrono) {
+    document.getElementById('profil-chrono-user').value = creds.chrono.username;
+    document.getElementById('profil-chrono-pwd').value  = '••••••••';
+  }
+  mettreAJourStatusProfil();
+  document.getElementById('modal-profil').classList.add('open');
+}
+
+function fermerProfil() {
+  document.getElementById('modal-profil').classList.remove('open');
+}
+
 // ── Modal réservation ────────────────────────────────
 let pendingReservation = null;
 
-function ouvrirModalReservation(terrainId, terrainNom, date, heure, joueurs, confirmUrlEncoded) {
+function ouvrirModalReservation(terrainId, terrainNom, date, heure, joueurs, confirmUrlEncoded, systeme) {
   const confirmUrl = decodeURIComponent(confirmUrlEncoded);
-  pendingReservation = { terrain_id: terrainId, confirm_url: confirmUrl, date, heure, nb_joueurs: joueurs };
+  pendingReservation = { terrain_id: terrainId, confirm_url: confirmUrl, date, heure, nb_joueurs: joueurs, systeme };
 
   const dateF = new Date(date + 'T12:00').toLocaleDateString('fr-CA', {
     weekday: 'long', day: 'numeric', month: 'long'
   });
-  document.getElementById('modal-resa-desc').textContent =
-    `${terrainNom} · ${dateF} · ${heure} · ${joueurs} joueur(s)`;
 
-  // Reset l'état du modal
-  document.getElementById('modal-resa-form').style.display = 'block';
+  // Remplir les infos du départ
+  document.getElementById('modal-resa-terrain').textContent = terrainNom;
+  document.getElementById('modal-resa-details').textContent =
+    `📅 ${dateF}  ·  🕐 ${heure}  ·  👥 ${joueurs} joueur(s)`;
+
+  // Vérifier si credentials disponibles
+  const creds = getCredentials();
+  const credSysteme = systeme === 'gggolf' ? creds.ggg : creds.chrono;
+
+  const noCredsEl   = document.getElementById('modal-resa-no-creds');
+  const hasCredsEl  = document.getElementById('modal-resa-has-creds');
+
+  if (credSysteme) {
+    noCredsEl.style.display  = 'none';
+    hasCredsEl.style.display = 'block';
+    hasCredsEl.textContent   = `✅ Connecté en tant que ${credSysteme.username}`;
+  } else {
+    noCredsEl.style.display  = 'block';
+    hasCredsEl.style.display = 'none';
+    document.getElementById('resa-username-inline').value = '';
+    document.getElementById('resa-password-inline').value = '';
+  }
+
+  // Reset états
+  document.getElementById('modal-resa-confirm').style.display = 'block';
   document.getElementById('modal-resa-loading').style.display = 'none';
-  document.getElementById('modal-resa-result').style.display = 'none';
-  document.getElementById('resa-username').value = '';
-  document.getElementById('resa-password').value = '';
+  document.getElementById('modal-resa-result').style.display  = 'none';
 
   document.getElementById('modal-reservation').classList.add('open');
 }
@@ -1038,16 +1205,27 @@ function fermerModalReservation() {
 async function confirmerReservation() {
   if (!pendingReservation) return;
 
-  const username = document.getElementById('resa-username').value.trim();
-  const password = document.getElementById('resa-password').value.trim();
+  // Obtenir les credentials
+  const creds = getCredentials();
+  const systeme = pendingReservation.systeme;
+  const credSysteme = systeme === 'gggolf' ? creds.ggg : creds.chrono;
 
-  if (!username || !password) {
-    afficherToast('Veuillez entrer vos identifiants GGG Golf', true);
-    return;
+  let username, password;
+
+  if (credSysteme) {
+    username = credSysteme.username;
+    password = credSysteme.password;
+  } else {
+    username = document.getElementById('resa-username-inline').value.trim();
+    password = document.getElementById('resa-password-inline').value.trim();
+    if (!username || !password) {
+      afficherToast('Veuillez entrer vos identifiants', true);
+      return;
+    }
   }
 
   // Afficher le loading
-  document.getElementById('modal-resa-form').style.display = 'none';
+  document.getElementById('modal-resa-confirm').style.display = 'none';
   document.getElementById('modal-resa-loading').style.display = 'block';
 
   try {
@@ -1055,7 +1233,11 @@ async function confirmerReservation() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ...pendingReservation,
+        terrain_id:  pendingReservation.terrain_id,
+        confirm_url: pendingReservation.confirm_url,
+        date:        pendingReservation.date,
+        heure:       pendingReservation.heure,
+        nb_joueurs:  pendingReservation.nb_joueurs,
         username,
         password,
       }),
@@ -1063,17 +1245,16 @@ async function confirmerReservation() {
 
     const data = await res.json();
 
-    // Afficher le résultat
     document.getElementById('modal-resa-loading').style.display = 'none';
-    document.getElementById('modal-resa-result').style.display = 'block';
+    document.getElementById('modal-resa-result').style.display  = 'block';
 
     if (data.succes) {
-      document.getElementById('modal-resa-result-icon').textContent = '✅';
-      document.getElementById('modal-resa-result-msg').textContent = data.message;
-      document.getElementById('modal-resa-fallback').style.display = 'none';
+      document.getElementById('modal-resa-result-icon').textContent = '⛳';
+      document.getElementById('modal-resa-result-msg').textContent  = data.message;
+      document.getElementById('modal-resa-fallback').style.display  = 'none';
     } else {
       document.getElementById('modal-resa-result-icon').textContent = '❌';
-      document.getElementById('modal-resa-result-msg').textContent = data.message;
+      document.getElementById('modal-resa-result-msg').textContent  = data.message;
       if (data.url_fallback) {
         document.getElementById('modal-resa-fallback').style.display = 'block';
         document.getElementById('modal-resa-fallback-link').href = data.url_fallback;
@@ -1081,9 +1262,9 @@ async function confirmerReservation() {
     }
   } catch(e) {
     document.getElementById('modal-resa-loading').style.display = 'none';
-    document.getElementById('modal-resa-result').style.display = 'block';
+    document.getElementById('modal-resa-result').style.display  = 'block';
     document.getElementById('modal-resa-result-icon').textContent = '❌';
-    document.getElementById('modal-resa-result-msg').textContent = 'Erreur de connexion au serveur.';
+    document.getElementById('modal-resa-result-msg').textContent  = 'Erreur de connexion au serveur.';
   }
 }
 
