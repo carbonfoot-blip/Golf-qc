@@ -128,16 +128,19 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
             await page.wait_for_load_state("networkidle", timeout=10000)
 
             content = await page.content()
-            logger.info(f"[Booker GGG] Page confirmation: {len(content)} chars")
+            logger.info(f"[Booker GGG] Page confirmation: {len(content)} chars — URL: {page.url}")
 
-            # Verifier qu'on est bien sur la page de confirmation (pas une erreur)
-            if "req=confirm" not in page.url and "confirm" not in content.lower():
-                await browser.close()
-                return {
-                    "succes": False,
-                    "message": "Ce départ n'est plus disponible. Il a peut-être été pris entre temps.",
-                    "url_fallback": confirm_url,
-                }
+            # Ne pas bloquer sur l'URL — GGG peut rediriger
+            # Verifier seulement si la page contient une erreur explicite
+            hard_errors = ["introuvable", "not found", "404", "acces refus"]
+            for err in hard_errors:
+                if err in content.lower():
+                    await browser.close()
+                    return {
+                        "succes": False,
+                        "message": "Ce départ n'est plus disponible.",
+                        "url_fallback": confirm_url,
+                    }
 
             # ── Étape 3 : Cliquer "J'accepte les termes et je confirme ma réservation" ──
             # Bouton GGG confirme: input[type="submit"] avec value="J'accepte les termes..."
