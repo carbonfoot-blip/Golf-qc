@@ -32,7 +32,10 @@
       "lat": 45.601,
       "lng": -73.438
     },
-    "chronogolf_course_id": 1740
+    "chronogolf_club_id": 1509,
+    "chronogolf_course_id": 1740,
+    "chronogolf_affiliation_id": 6753,
+    "chronogolf_api_version": "v1"
   },
   {
     "id": "boucherville",
@@ -67,7 +70,10 @@
       "lat": 45.533,
       "lng": -73.283
     },
-    "chronogolf_course_id": 22421
+    "chronogolf_club_id": 86,
+    "chronogolf_course_id": 22421,
+    "chronogolf_affiliation_id": 98,
+    "chronogolf_api_version": "v1"
   },
   {
     "id": "saint-jean",
@@ -136,7 +142,10 @@
       "lat": 45.42,
       "lng": -73.15
     },
-    "chronogolf_course_id": "844bc3ef-34b2-4d54-a14b-f85f074113e8"
+    "chronogolf_club_id": null,
+    "chronogolf_course_id": "844bc3ef-34b2-4d54-a14b-f85f074113e8",
+    "chronogolf_affiliation_id": null,
+    "chronogolf_api_version": "v2"
   },
   {
     "id": "saint-cesaire",
@@ -154,7 +163,10 @@
       "lat": 45.418,
       "lng": -72.988
     },
-    "chronogolf_course_id": 1451
+    "chronogolf_club_id": 1451,
+    "chronogolf_course_id": 1679,
+    "chronogolf_affiliation_id": 6521,
+    "chronogolf_api_version": "v1"
   },
   {
     "id": "beloeil",

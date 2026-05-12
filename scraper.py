@@ -1,5 +1,8 @@
 """
-scraper.py — GGG Golf via POST httpx, Chronogolf via API REST httpx.
+scraper.py — GGG via POST httpx, Chronogolf via marketplace API httpx.
+Deux versions Chronogolf:
+  v1: /fr/marketplace/clubs/{club_id}/teetimes?date=...&course_id=...&affiliation_type_ids[]=...
+  v2: /marketplace/v2/teetimes?start_date=...&course_ids={uuid} (chronogolf.com)
 """
 
 import logging
@@ -8,7 +11,7 @@ import json
 import httpx
 from datetime import datetime, timedelta
 from typing import Optional
-from playwright.async_api import async_playwright, TimeoutError as PwTimeout
+from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 TIMEOUT = 30_000
@@ -21,7 +24,7 @@ async def get_available_tee_times(terrain, date, heure_debut, heure_fin, nb_joue
         if systeme == "gggolf":
             return await _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
         elif systeme == "chronogolf":
-            return await _scrape_chronogolf_api(terrain, date, heure_debut, heure_fin, nb_joueurs)
+            return await _scrape_chronogolf(terrain, date, heure_debut, heure_fin, nb_joueurs)
         else:
             return await _scrape_generic_playwright(terrain, date, heure_debut, heure_fin, nb_joueurs)
     except Exception as e:
@@ -50,7 +53,7 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
         "Origin": "https://secure.gggolf.ca",
     }
 
-    payloads_a_essayer = [
+    payloads = [
         {"date": date, "hour": heure_h, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
         {"date": date, "hour": heure_h_padded, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
         {"date": date, "hour": heure_h, "minute": "00", "nb_players": str(nb_joueurs), "search": "Chercher les départs"},
@@ -60,7 +63,6 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
             get_resp = await client.get(url, headers=headers)
-            logger.info(f"[GGG] GET: {get_resp.status_code}")
 
             ggg_options = _extract_ggg_options(get_resp.text)
             if ggg_options:
@@ -70,27 +72,24 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
                 if cal_min and cal_max:
                     try:
                         target = datetime.strptime(date, "%Y-%m-%d").date()
-                        min_d = datetime.strptime(cal_min, "%Y-%m-%d").date()
-                        max_d = datetime.strptime(cal_max, "%Y-%m-%d").date()
-                        if not (min_d <= target <= max_d):
+                        if not (datetime.strptime(cal_min, "%Y-%m-%d").date() <= target
+                                <= datetime.strptime(cal_max, "%Y-%m-%d").date()):
                             logger.info(f"[GGG] Hors fenetre")
                             return []
                     except Exception:
                         pass
 
-            for payload in payloads_a_essayer:
+            for payload in payloads:
                 resp = await client.post(url, data=payload, headers=headers)
                 logger.info(f"[GGG] POST {resp.status_code}: {len(resp.text)} chars (hour={payload.get('hour')})")
-
                 if resp.status_code == 200 and len(resp.text) > 5000:
                     results = _parse_gggolf_html(resp.text, terrain, date, heure_debut, heure_fin, nb_joueurs)
                     if results:
-                        logger.info(f"[GGG] {len(results)} depart(s) trouves")
+                        logger.info(f"[GGG] {len(results)} depart(s)")
                         return results
 
             logger.info(f"[GGG] Aucun depart pour {terrain['nom']}")
             return []
-
     except Exception as e:
         logger.error(f"[GGG] Erreur: {e}")
         return []
@@ -111,28 +110,19 @@ def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
     url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
 
     heures = []
-
     bloc_pattern = re.compile(
         r'data-confirm-url="([^"]+)"[^>]*>.*?teetimes_results-hour[^>]*>'
         r'.*?Heure:?</span>\s*(\d{1,2}:\d{2})',
         re.DOTALL | re.IGNORECASE
     )
-
     for m in bloc_pattern.finditer(html):
-        confirm_url = m.group(1)
         h = _normalize_time(m.group(2).strip())
         if h and _in_range(h, heure_debut, heure_fin):
-            heures.append({
-                "heure": h,
-                "places": nb_joueurs,
-                "prix": "Voir site",
-                "url": confirm_url,
-            })
+            heures.append({"heure": h, "places": nb_joueurs, "prix": "Voir site", "url": m.group(1)})
 
     if heures:
         return heures
 
-    # Fallback sans URL directe
     heure_pattern = re.compile(
         r'teetimes_results-hour[^>]*>.*?Heure:?</span>\s*(\d{1,2}:\d{2})',
         re.DOTALL | re.IGNORECASE
@@ -142,23 +132,48 @@ def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
         h = _normalize_time(m.group(1).strip())
         if h and _in_range(h, heure_debut, heure_fin):
             results.append({"heure": h, "places": nb_joueurs, "prix": "Voir site", "url": url_base})
-
     return results
 
 
 # ─────────────────────────────────────────────
-# Chronogolf — API REST directe avec httpx
+# Chronogolf — marketplace API httpx
 # ─────────────────────────────────────────────
 
-async def _scrape_chronogolf_api(terrain, date, heure_debut, heure_fin, nb_joueurs):
+async def _scrape_chronogolf(terrain, date, heure_debut, heure_fin, nb_joueurs):
+    api_version = terrain.get("chronogolf_api_version", "v1")
+
+    if api_version == "v2":
+        return await _scrape_chronogolf_v2(terrain, date, heure_debut, heure_fin, nb_joueurs)
+    else:
+        return await _scrape_chronogolf_v1(terrain, date, heure_debut, heure_fin, nb_joueurs)
+
+
+async def _scrape_chronogolf_v1(terrain, date, heure_debut, heure_fin, nb_joueurs):
+    """
+    URL: /fr/marketplace/clubs/{club_id}/teetimes
+    Params: date, course_id, affiliation_type_ids[], nb_holes
+    """
+    club_id = terrain.get("chronogolf_club_id")
     course_id = terrain.get("chronogolf_course_id")
+    affiliation_id = terrain.get("chronogolf_affiliation_id")
     slug = terrain.get("chronogolf_slug", terrain["id"])
 
-    if not course_id:
-        logger.warning(f"[Chrono] Pas de course_id pour {terrain['nom']} — carte grisee")
+    if not club_id or not course_id:
+        logger.warning(f"[Chrono v1] IDs manquants pour {terrain['nom']}")
         return []
 
-    logger.info(f"[Chrono] API: {terrain['nom']} — course_id={course_id} — {date}")
+    logger.info(f"[Chrono v1] {terrain['nom']} — club={club_id} course={course_id} — {date}")
+
+    url = f"https://www.chronogolf.ca/fr/marketplace/clubs/{club_id}/teetimes"
+    params = {
+        "date": date,
+        "course_id": str(course_id),
+        "nb_holes": "18",
+        "nb_players": str(nb_joueurs),
+    }
+    # Ajouter affiliation_type_ids si disponible
+    if affiliation_id:
+        params["affiliation_type_ids[]"] = str(affiliation_id)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
@@ -168,75 +183,108 @@ async def _scrape_chronogolf_api(terrain, date, heure_debut, heure_fin, nb_joueu
         "X-Requested-With": "XMLHttpRequest",
     }
 
-    # Chronogolf supporte deux formats d'API selon la version du terrain
-    urls_a_essayer = [
-        # API v1 standard (course_id entier)
-        (
-            "https://www.chronogolf.ca/api/v1/tee_times",
-            {"date": date, "course_id": str(course_id), "nb_players": str(nb_joueurs), "nb_holes": "18"},
-        ),
-        # API v2 ou UUID
-        (
-            f"https://www.chronogolf.ca/api/v1/tee_times",
-            {"date": date, "course_id": str(course_id), "nb_players": str(nb_joueurs)},
-        ),
-        # Format alternatif avec club_id
-        (
-            "https://www.chronogolf.ca/api/v1/tee_times",
-            {"date": date, "club_id": str(course_id), "nb_players": str(nb_joueurs), "nb_holes": "18"},
-        ),
-    ]
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            # Cookie de session
+            await client.get(f"https://www.chronogolf.ca/club/{slug}", headers=headers)
+
+            resp = await client.get(url, params=params, headers=headers)
+            logger.info(f"[Chrono v1] {resp.status_code}: {len(resp.text)} chars")
+
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info(f"[Chrono v1] JSON recu: {str(data)[:300]}")
+                return _parse_chronogolf_teetimes(data, terrain, heure_debut, heure_fin, nb_joueurs)
+
+            logger.warning(f"[Chrono v1] Status {resp.status_code} pour {terrain['nom']}")
+            return []
+
+    except Exception as e:
+        logger.error(f"[Chrono v1] Erreur {terrain['nom']}: {e}")
+        return []
+
+
+async def _scrape_chronogolf_v2(terrain, date, heure_debut, heure_fin, nb_joueurs):
+    """
+    URL: /marketplace/v2/teetimes (chronogolf.com)
+    Params: start_date, course_ids (UUID), holes, page
+    """
+    course_id = terrain.get("chronogolf_course_id")
+    slug = terrain.get("chronogolf_slug", terrain["id"])
+
+    if not course_id:
+        logger.warning(f"[Chrono v2] course_id manquant pour {terrain['nom']}")
+        return []
+
+    logger.info(f"[Chrono v2] {terrain['nom']} — course_id={course_id} — {date}")
+
+    url = "https://www.chronogolf.com/marketplace/v2/teetimes"
+    params = {
+        "start_date": date,
+        "course_ids": str(course_id),
+        "holes": "9,18",
+        "page": "1",
+        "nb_players": str(nb_joueurs),
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "fr-CA,fr;q=0.9",
+        "Referer": f"https://www.chronogolf.com/club/{slug}",
+        "X-Requested-With": "XMLHttpRequest",
+    }
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
-            # GET initial pour les cookies de session
-            await client.get(f"https://www.chronogolf.ca/club/{slug}", headers=headers)
+            await client.get(f"https://www.chronogolf.com/club/{slug}", headers=headers)
 
-            for api_url, params in urls_a_essayer:
-                try:
-                    resp = await client.get(api_url, params=params, headers=headers)
-                    logger.info(f"[Chrono] {resp.status_code}: {len(resp.text)} chars — {resp.url}")
+            resp = await client.get(url, params=params, headers=headers)
+            logger.info(f"[Chrono v2] {resp.status_code}: {len(resp.text)} chars")
 
-                    if resp.status_code == 200 and resp.text.strip():
-                        data = resp.json()
-                        results = _parse_chronogolf_response(data, terrain, date, heure_debut, heure_fin, nb_joueurs)
-                        if results:
-                            return results
-                except Exception as e:
-                    logger.warning(f"[Chrono] Variant echoue: {e}")
-                    continue
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info(f"[Chrono v2] JSON recu: {str(data)[:300]}")
+                return _parse_chronogolf_teetimes(data, terrain, heure_debut, heure_fin, nb_joueurs)
 
-        logger.info(f"[Chrono] Aucun depart pour {terrain['nom']}")
-        return []
+            logger.warning(f"[Chrono v2] Status {resp.status_code} pour {terrain['nom']}")
+            return []
 
     except Exception as e:
-        logger.error(f"[Chrono] Erreur: {e}")
+        logger.error(f"[Chrono v2] Erreur {terrain['nom']}: {e}")
         return []
 
 
-def _parse_chronogolf_response(data, terrain, date, heure_debut, heure_fin, nb_joueurs):
+def _parse_chronogolf_teetimes(data, terrain, heure_debut, heure_fin, nb_joueurs):
     slug = terrain.get("chronogolf_slug", terrain["id"])
     url_base = f"https://www.chronogolf.ca/club/{slug}"
     results = []
 
-    slots = data if isinstance(data, list) else (
-        data.get("tee_times") or data.get("data") or data.get("slots") or []
+    # Chronogolf peut retourner plusieurs structures
+    slots = (
+        data if isinstance(data, list) else
+        data.get("tee_times") or data.get("data") or
+        data.get("slots") or data.get("results") or []
     )
 
     for slot in slots:
-        start = slot.get("start_time") or slot.get("time") or slot.get("hour") or ""
-        # Format ISO: "2026-05-13T14:00:00" → "14:00"
+        # Extraire l'heure — format ISO ou HH:MM
+        start = (slot.get("start_time") or slot.get("time") or
+                 slot.get("hour") or slot.get("tee_time") or "")
         if "T" in str(start):
             start = str(start).split("T")[1][:5]
         h = _normalize_time(str(start))
         if not h or not _in_range(h, heure_debut, heure_fin):
             continue
 
-        available = slot.get("available_spots", slot.get("spots", slot.get("nb_players_available", 4)))
+        # Places disponibles
+        available = (slot.get("available_spots") or slot.get("spots") or
+                    slot.get("nb_players_available") or slot.get("availability") or 4)
         if isinstance(available, int) and available < nb_joueurs:
             continue
 
-        prix = slot.get("green_fee", slot.get("price", slot.get("rate", "Voir site")))
+        # Prix
+        prix = slot.get("green_fee") or slot.get("price") or slot.get("rate") or "Voir site"
         if isinstance(prix, (int, float)):
             prix = f"{prix:.0f}$"
 
@@ -252,7 +300,7 @@ def _parse_chronogolf_response(data, terrain, date, heure_debut, heure_fin, nb_j
 
 
 # ─────────────────────────────────────────────
-# Generique (site_propre) — Playwright
+# Generique — Playwright
 # ─────────────────────────────────────────────
 
 async def _scrape_generic_playwright(terrain, date, heure_debut, heure_fin, nb_joueurs):
