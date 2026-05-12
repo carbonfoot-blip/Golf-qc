@@ -63,6 +63,7 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
             get_resp = await client.get(url, headers=headers)
+            logger.info(f"[GGG] Cookies apres GET: {dict(client.cookies)}")
 
             ggg_options = _extract_ggg_options(get_resp.text)
             if ggg_options:
@@ -92,14 +93,16 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
             # Logger extrait HTML pour debug
             if resp and len(resp.text) > 5000:
                 html = resp.text
-                # Chercher autogrid ou teetimes dans le HTML
-                for kw in ["autogrid", "teetimes_results", "data-colno", "agCol1"]:
-                    idx = html.lower().find(kw.lower())
+                patterns_a_chercher = ["agCol1", "autogridOdd", "autogridEven", "teetimes_results-hour"]
+                found = False
+                for kw in patterns_a_chercher:
+                    idx = html.find(kw)
                     if idx > 0:
-                        logger.info(f"[GGG] Debug '{kw}' trouve a {idx}: {html[max(0,idx-50):idx+200]}")
+                        logger.info(f"[GGG] Debug trouve '{kw}' a {idx}: {html[max(0,idx-100):idx+300]}")
+                        found = True
                         break
-                else:
-                    logger.info(f"[GGG] HTML[2000:3500]: {html[2000:3500]}")
+                if not found:
+                    logger.info(f"[GGG] Aucun pattern. HTML[4000:5500]: {html[4000:5500]}")
             logger.info(f"[GGG] Aucun depart pour {terrain['nom']}")
             return []
     except Exception as e:
