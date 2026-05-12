@@ -51,8 +51,18 @@ async def _reserver_gggolf(terrain: dict, confirm_url: str, username: str, passw
             get_resp = await client.get(login_url)
             logger.info(f"[Booker GGG] GET login: {get_resp.status_code} — cookies: {dict(client.cookies)}")
 
-            # ── Étape 2 : POST credentials ──
+            # ── Étape 2 : Extraire les champs hidden du formulaire de login (CSRF token) ──
+            hidden_login = {}
+            pat = re.compile(r'<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"', re.IGNORECASE)
+            for m in pat.finditer(get_resp.text):
+                hidden_login[m.group(1)] = m.group(2)
+            pat2 = re.compile(r'<input[^>]+name="([^"]+)"[^>]+type="hidden"[^>]+value="([^"]*)"', re.IGNORECASE)
+            for m in pat2.finditer(get_resp.text):
+                hidden_login[m.group(1)] = m.group(2)
+            logger.info(f"[Booker GGG] Champs hidden login: {hidden_login}")
+
             login_payload = {
+                **hidden_login,
                 "email": username,
                 "password": password,
                 "option": "com_ggpublic",
