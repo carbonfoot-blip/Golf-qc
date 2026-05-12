@@ -585,6 +585,35 @@
     .toast.show { transform: translateY(0); opacity: 1; }
     .toast.error { background: var(--red); }
 
+    /* ── Favoris ── */
+    .favoris-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+    .favori-item {
+      display: flex; align-items: center; gap: .5rem;
+      background: var(--sand); border-radius: 8px; padding: .5rem .75rem;
+      font-size: .8rem;
+    }
+    .favori-item-label { flex: 1; color: var(--text); }
+    .favori-item-region { color: var(--text-muted); font-size: .75rem; }
+    .favori-btn-use {
+      background: var(--green-700); color: white; border: none;
+      padding: .25rem .625rem; border-radius: 6px; font-size: .75rem;
+      font-family: inherit; cursor: pointer; white-space: nowrap;
+    }
+    .favori-btn-del {
+      background: none; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: .875rem; padding: .1rem .3rem;
+    }
+    .favoris-empty { color: var(--text-muted); font-size: .8rem; font-style: italic; }
+
+    /* Bouton favoris dans la search card */
+    .btn-favoris {
+      background: transparent; border: 1.5px solid var(--green-300);
+      color: var(--green-700); padding: .5rem .875rem; border-radius: 8px;
+      font-family: inherit; font-size: .8rem; font-weight: 600;
+      cursor: pointer; transition: background .15s; white-space: nowrap;
+    }
+    .btn-favoris:hover { background: var(--green-100); }
+
     @media (max-width: 600px) {
       header { padding: 0 1rem; }
       .hero { padding: 2rem 1rem 3rem; }
@@ -648,7 +677,10 @@
         <span class="apex-pill"></span>
         Membres Apex Golf en priorité
       </label>
-      <button class="btn-search" onclick="lancerRecherche()">Rechercher les départs</button>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="btn-favoris" onclick="ouvrirModalFavoris()">⭐ Mes favoris</button>
+        <button class="btn-search" onclick="lancerRecherche()">Rechercher les départs</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1266,6 +1298,118 @@ async function confirmerReservation() {
     document.getElementById('modal-resa-result-icon').textContent = '❌';
     document.getElementById('modal-resa-result-msg').textContent  = 'Erreur de connexion au serveur.';
   }
+}
+
+// ── Favoris (localStorage) ───────────────────────────
+const FAVORIS_KEY = 'golf_alert_favoris';
+const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+
+function getFavoris() {
+  try {
+    return JSON.parse(localStorage.getItem(FAVORIS_KEY) || '[]');
+  } catch(e) { return []; }
+}
+
+function ajouterFavori() {
+  const region = document.getElementById('fav-region').value;
+  const jour   = parseInt(document.getElementById('fav-jour').value);
+  const debut  = document.getElementById('fav-debut').value;
+  const fin    = document.getElementById('fav-fin').value;
+
+  if (!region || !debut || !fin) {
+    afficherToast('Veuillez remplir tous les champs', true);
+    return;
+  }
+  if (debut >= fin) {
+    afficherToast("L'heure de fin doit être après l'heure de début", true);
+    return;
+  }
+
+  const favoris = getFavoris();
+  if (favoris.length >= 8) {
+    afficherToast('Maximum 8 favoris', true);
+    return;
+  }
+
+  favoris.push({ id: Date.now(), region, jour, debut, fin });
+  localStorage.setItem(FAVORIS_KEY, JSON.stringify(favoris));
+  afficherToast('✅ Favori ajouté');
+  afficherListeFavoris();
+}
+
+function supprimerFavori(id) {
+  const favoris = getFavoris().filter(f => f.id !== id);
+  localStorage.setItem(FAVORIS_KEY, JSON.stringify(favoris));
+  afficherListeFavoris();
+}
+
+function utiliserFavori(favori) {
+  // Trouver le prochain jour correspondant
+  const today = new Date();
+  let target = new Date(today);
+  const todayDay = today.getDay();
+  let daysAhead = (favori.jour - todayDay + 7) % 7;
+  if (daysAhead === 0) daysAhead = 7; // Toujours le prochain, pas aujourd'hui
+
+  target.setDate(today.getDate() + daysAhead);
+  const dateStr = target.toISOString().split('T')[0];
+
+  // Appliquer au formulaire
+  document.getElementById('sel-region').value    = favori.region;
+  document.getElementById('inp-date').value       = dateStr;
+  document.getElementById('inp-heure-debut').value = favori.debut;
+  document.getElementById('inp-heure-fin').value   = favori.fin;
+
+  fermerModalFavoris();
+
+  const dateF = target.toLocaleDateString('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' });
+  afficherToast(`✅ ${JOURS_FR[favori.jour]} ${favori.debut}–${favori.fin} · ${dateF}`);
+}
+
+function afficherListeFavoris() {
+  const favoris = getFavoris();
+  const container = document.getElementById('favoris-list-container');
+  if (!container) return;
+
+  if (favoris.length === 0) {
+    container.innerHTML = '<p class="favoris-empty">Aucun favori sauvegardé.</p>';
+    return;
+  }
+
+  container.innerHTML = '<div class="favoris-list">' + favoris.map(f => `
+    <div class="favori-item">
+      <div>
+        <div class="favori-item-label">${JOURS_FR[f.jour]} · ${f.debut} – ${f.fin}</div>
+        <div class="favori-item-region">${f.region}</div>
+      </div>
+      <button class="favori-btn-use" onclick="utiliserFavori(${JSON.stringify(f).replace(/"/g, '&quot;')})">
+        Utiliser
+      </button>
+      <button class="favori-btn-del" onclick="supprimerFavori(${f.id})" title="Supprimer">✕</button>
+    </div>
+  `).join('') + '</div>';
+}
+
+function ouvrirModalFavoris() {
+  // Peupler le select des régions
+  const selRegion = document.getElementById('fav-region');
+  if (selRegion && selRegion.options.length <= 1) {
+    const mainSel = document.getElementById('sel-region');
+    Array.from(mainSel.options).forEach(opt => {
+      if (opt.value) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.textContent;
+        selRegion.appendChild(o);
+      }
+    });
+  }
+  afficherListeFavoris();
+  document.getElementById('modal-favoris').classList.add('open');
+}
+
+function fermerModalFavoris() {
+  document.getElementById('modal-favoris').classList.remove('open');
 }
 
 // ── Utilitaires ───────────────────────────────────────
