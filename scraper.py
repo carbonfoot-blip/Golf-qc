@@ -1,6 +1,6 @@
 """
 scraper.py — GGG Golf POST direct avec httpx.
-Payload exact: date, hour, minute, nbplayers, search
+Pattern HTML confirme: class="teetimes_results-hour col-sm-1"
 """
 
 import logging
@@ -65,7 +65,7 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
-            # GET initial pour les cookies
+            # GET initial pour les cookies de session
             get_resp = await client.get(url, headers=headers)
             logger.info(f"[GGG] GET: {get_resp.status_code}")
 
@@ -91,15 +91,7 @@ async def _scrape_gggolf_post(terrain, date, heure_debut, heure_fin, nb_joueurs)
             logger.info(f"[GGG] POST {resp.status_code}: {len(resp.text)} chars")
 
             if resp.status_code == 200 and len(resp.text) > 5000:
-                # Logger extrait HTML pour debug
-                html = resp.text
-                for keyword in ["reservez", "reserv", "15:", "14:", "13:", "12:", "11:", "10:", "09:", "08:", "07:"]:
-                    idx = html.lower().find(keyword)
-                    if idx > 0:
-                        logger.info(f"[GGG] Extrait '{keyword}': {html[max(0,idx-200):idx+600]}")
-                        break
-
-                results = _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs)
+                results = _parse_gggolf_html(resp.text, terrain, date, heure_debut, heure_fin, nb_joueurs)
                 if results:
                     return results
 
@@ -125,61 +117,62 @@ def _extract_ggg_options(html):
 
 
 def _parse_gggolf_html(html, terrain, date, heure_debut, heure_fin, nb_joueurs):
+    """
+    Structure HTML confirmee par inspection:
+    <div class="teetimes_results-hour col-sm-1">
+        <span class="visible-xs">Heure:</span> 15:02
+    </div>
+
+    URL de reservation dans data-confirm-url:
+    data-confirm-url="...&id=XXXXX&nbholes=18&nbplayers=2"
+    """
     slug = terrain.get("ggg_slug", terrain["id"])
     url_base = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
 
-    heures = set()
+    heures = []
 
-    patterns = [
-        # Pattern principal observe: "Heure: 15:02" dans cellule tableau
-        r'Heure\s*:?\s*</td>\s*<td[^>]*>\s*(\d{1,2}:\d{2})',
-        r'Heure\s*:?\s*<[^>]+>\s*<[^>]+>\s*(\d{1,2}:\d{2})',
-        # Classes CSS teetimes GGG
-        r'class="[^"]*ttime[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
-        r'class="[^"]*teetime[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
-        r'class="[^"]*heure[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
-        r'class="[^"]*hour[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
-        r'class="[^"]*start[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
-        r'class="[^"]*time[^"]*"[^>]*>\s*(\d{1,2}:\d{2})',
-        # Attributs data
-        r'data-time="(\d{1,2}:\d{2})"',
-        r'data-heure="(\d{1,2}:\d{2})"',
-        # JSON inline
-        r'"time"\s*:\s*"(\d{1,2}:\d{2})"',
-        r'"heure"\s*:\s*"(\d{1,2}:\d{2})"',
-        r'"hour"\s*:\s*"(\d{1,2}:\d{2})"',
-        # Heures dans liens reservation
-        r'href="[^"]*[&?]hour=(\d{1,2})[^"]*"',
-        r'href="[^"]*[&?]heure=(\d{1,2})[^"]*"',
-        r'href="[^"]*[&?]time=(\d{1,2}%3A\d{2})[^"]*"',
-        # Heures seules dans cellules td/li
-        r'<td[^>]*>\s*(\d{1,2}h\d{2})\s*</td>',
-        r'<td[^>]*>\s*(\d{1,2}:\d{2})\s*</td>',
-        r'<li[^>]*>\s*(\d{1,2}:\d{2})\s*</li>',
-        r'<span[^>]*>\s*(\d{1,2}:\d{2})\s*</span>',
-    ]
+    # Pattern principal confirme — extraire heure ET url de confirmation par bloc
+    # Chaque depart est dans un div avec data-confirm-url et contient teetimes_results-hour
+    bloc_pattern = re.compile(
+        r'data-confirm-url="([^"]+)"[^>]*>.*?teetimes_results-hour[^>]*>'
+        r'.*?Heure:?</span>\s*(\d{1,2}:\d{2})',
+        re.DOTALL | re.IGNORECASE
+    )
 
-    for pat in patterns:
-        for m in re.finditer(pat, html, re.IGNORECASE | re.DOTALL):
-            raw = m.group(1).replace("%3A", ":").replace("h", ":")
-            # Si c'est juste un chiffre (ex: href hour=15), ajouter :00
-            if re.match(r'^\d{1,2}$', raw):
-                raw = f"{raw}:00"
-            h = _normalize_time(raw)
-            if h and "06:00" <= h <= "20:00":
-                heures.add(h)
+    for m in bloc_pattern.finditer(html):
+        confirm_url = m.group(1)
+        heure_raw = m.group(2).strip()
+        h = _normalize_time(heure_raw)
+        if h and _in_range(h, heure_debut, heure_fin):
+            heures.append({
+                "heure": h,
+                "places": nb_joueurs,
+                "prix": "Voir site",
+                "url": confirm_url,  # URL directe de reservation pour ce creneau
+            })
 
-    logger.info(f"[GGG] Heures parsees: {sorted(heures)}")
+    if heures:
+        logger.info(f"[GGG] {len(heures)} depart(s) avec URLs directes")
+        return heures
+
+    # Fallback — juste extraire les heures sans URL specifique
+    heure_pattern = re.compile(
+        r'teetimes_results-hour[^>]*>.*?Heure:?</span>\s*(\d{1,2}:\d{2})',
+        re.DOTALL | re.IGNORECASE
+    )
 
     results = []
-    for heure in sorted(heures):
-        if _in_range(heure, heure_debut, heure_fin):
+    for m in heure_pattern.finditer(html):
+        h = _normalize_time(m.group(1).strip())
+        if h and _in_range(h, heure_debut, heure_fin):
             results.append({
-                "heure": heure,
+                "heure": h,
                 "places": nb_joueurs,
                 "prix": "Voir site",
                 "url": url_base,
             })
+
+    logger.info(f"[GGG] {len(results)} depart(s) trouves (fallback sans URL directe)")
     return results
 
 
