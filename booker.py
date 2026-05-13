@@ -340,21 +340,43 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 if captcha_token:
                     injected = await page.evaluate(f"""
                         (function() {{
-                            var fields = document.querySelectorAll('[name="cf-turnstile-response"]');
-                            fields.forEach(function(f) {{ f.value = '{captcha_token}'; }});
-                            var scope = angular.element(document.querySelector('session-login')).scope();
-                            if (scope) {{
-                                scope.$apply(function() {{
-                                    scope.credentials = scope.credentials || {{}};
-                                    scope.credentials.turnstileToken = '{captcha_token}';
-                                }});
-                                return true;
+                            var token = '{captcha_token}';
+
+                            // 1. Champ hidden standard
+                            document.querySelectorAll('[name="cf-turnstile-response"]').forEach(function(f) {{
+                                f.value = token;
+                            }});
+
+                            // 2. Callback officiel Turnstile
+                            if (window.turnstile) {{
+                                try {{ window.turnstile.reset(); }} catch(e) {{}}
                             }}
-                            return false;
+
+                            // 3. Angular scope - credentials.turnstileToken
+                            try {{
+                                var el = document.querySelector('session-login') || document.querySelector('[ng-controller]');
+                                if (el) {{
+                                    var scope = angular.element(el).scope();
+                                    if (scope) {{
+                                        scope.$apply(function() {{
+                                            if (!scope.credentials) scope.credentials = {{}};
+                                            scope.credentials.turnstileToken = token;
+                                        }});
+                                    }}
+                                }}
+                            }} catch(e) {{}}
+
+                            // 4. Dispatch event pour notifier Angular
+                            document.querySelectorAll('[name="cf-turnstile-response"]').forEach(function(f) {{
+                                f.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                f.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            }});
+
+                            return true;
                         }})()
                     """)
                     logger.info(f"[Booker Chrono] Turnstile token injecte: {injected}")
-                    await page.wait_for_timeout(500)
+                    await page.wait_for_timeout(1000)
 
             # Soumettre
             login_btn = await page.query_selector("button[type='submit'], input[type='submit']")
