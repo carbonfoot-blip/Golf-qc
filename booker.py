@@ -35,6 +35,47 @@ async def _solve_recaptcha(site_key: str, page_url: str) -> str:
     return await _solve_recaptcha_v3(site_key, page_url, "login")
 
 
+async def _solve_turnstile(site_key: str, page_url: str) -> str:
+    """Résout Cloudflare Turnstile via 2captcha."""
+    if not TWOCAPTCHA_KEY:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            submit = await client.post(
+                "https://2captcha.com/in.php",
+                data={
+                    "key": TWOCAPTCHA_KEY,
+                    "method": "turnstile",
+                    "sitekey": site_key,
+                    "pageurl": page_url,
+                    "json": 1,
+                }
+            )
+            submit_data = submit.json()
+            logger.info(f"[2captcha] Turnstile submit: {submit_data}")
+            if submit_data.get("status") != 1:
+                return ""
+
+            captcha_id = submit_data["request"]
+            for attempt in range(24):
+                await asyncio.sleep(5)
+                result = await client.get(
+                    "https://2captcha.com/res.php",
+                    params={"key": TWOCAPTCHA_KEY, "action": "get", "id": captcha_id, "json": 1}
+                )
+                result_data = result.json()
+                if result_data.get("status") == 1:
+                    logger.info(f"[2captcha] Turnstile token: {result_data['request'][:30]}...")
+                    return result_data["request"]
+                if result_data.get("request") not in ["CAPCHA_NOT_READY", "CAPTCHA_NOT_READY"]:
+                    logger.error(f"[2captcha] Erreur: {result_data}")
+                    return ""
+        return ""
+    except Exception as e:
+        logger.error(f"[2captcha] Turnstile exception: {e}")
+        return ""
+
+
 async def _solve_recaptcha_v3(site_key: str, page_url: str, action: str = "login") -> str:
     """Résout reCAPTCHA v3 via 2captcha."""
     if not TWOCAPTCHA_KEY:
@@ -244,7 +285,7 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
     affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
     url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
-    login_url = "https://www.chronogolf.com/login"
+    login_url = "https://www.chronogolf.ca/fr"  # popup login sur .ca
 
     logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure}")
 
@@ -273,32 +314,20 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             await page.goto(login_url, timeout=TIMEOUT, wait_until="networkidle")
             await page.wait_for_timeout(2000)
 
-            # Chercher reCAPTCHA v2 ET v3 (v3 est invisible, dans le JS)
-            site_key = await page.evaluate("""
-                document.querySelector('[data-sitekey]')?.dataset?.sitekey ||
-                document.querySelector('.g-recaptcha')?.dataset?.sitekey ||
-                (function() {
-                    var scripts = Array.from(document.querySelectorAll('script'));
-                    for (var s of scripts) {
-                        var m = (s.src || '').match(/render=([^&]+)/);
-                        if (m) return m[1];
-                    }
-                    return '';
-                })() || ''
-            """)
-            logger.info(f"[Booker Chrono] reCAPTCHA site_key: '{site_key[:40] if site_key else 'non trouve'}'")
+            # Sitekey Cloudflare Turnstile de chronogolf.ca (fixe)
+            site_key = "0x4AAAAAAB4i_hVoLpRMv5pk"
+            logger.info(f"[Booker Chrono] Turnstile sitekey: {site_key}")
 
-            # Si pas trouvé via DOM, chercher dans le source HTML
-            if not site_key:
-                page_html = await page.content()
-                import re as _re2
-                m = _re2.search(r"'([0-9A-Za-z_-]{40})'", page_html)
-                if m:
-                    site_key = m.group(1)
-                    logger.info(f"[Booker Chrono] site_key depuis HTML: {site_key[:20]}")
+            # Attendre que le popup de login apparaisse sur .ca
+            await page.wait_for_timeout(2000)
+            # Cliquer "Se connecter" si pas encore ouvert
+            login_trigger = await page.query_selector("a:has-text('Se connecter'), button:has-text('Se connecter')")
+            if login_trigger:
+                await login_trigger.click()
+                await page.wait_for_timeout(1500)
 
-            email_field = await page.query_selector("input[name='email'], input[id='sessionEmail']")
-            pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword']")
+            email_field = await page.query_selector("input[name='email'], input[id='sessionEmail'], input[type='email']")
+            pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword'], input[type='password']")
 
             if not email_field or not pwd_field:
                 await browser.close()
@@ -311,69 +340,58 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             await pwd_field.type(password, delay=30)
             await page.wait_for_timeout(500)
 
-            # Résoudre reCAPTCHA v3 (invisible) via 2captcha
+            # Résoudre Cloudflare Turnstile via 2captcha
             if TWOCAPTCHA_KEY:
-                # Utiliser le site_key trouvé ou celui connu de Chronogolf
-                captcha_site_key = site_key or "6LdSsN0UAAAAAMJmBPcmz9eRm4bpjYUBWNpgfBni"
-                logger.info(f"[Booker Chrono] Résolution reCAPTCHA v3 via 2captcha (key={captcha_site_key[:20]})")
-                captcha_token = await _solve_recaptcha_v3(captcha_site_key, login_url, "login")
+                logger.info(f"[Booker Chrono] Résolution Turnstile via 2captcha")
+                captcha_token = await _solve_turnstile(site_key, login_url)
                 if captcha_token:
+                    # Injecter le token Turnstile dans le champ Angular
                     injected = await page.evaluate(f"""
                         (function() {{
-                            // Injecter dans le champ standard
-                            var el = document.getElementById('g-recaptcha-response');
-                            if (el) {{ el.value = '{captcha_token}'; el.style.display = 'block'; }}
+                            // Champ hidden cf-turnstile-response
+                            var fields = document.querySelectorAll('[name="cf-turnstile-response"]');
+                            fields.forEach(function(f) {{ f.value = '{captcha_token}'; }});
 
-                            // Trouver et appeler le callback Angular reCAPTCHA
-                            var called = false;
-                            if (window.grecaptcha) {{
-                                // Override getResponse pour retourner notre token
-                                var orig = window.grecaptcha.getResponse;
-                                window.grecaptcha.getResponse = function() {{ return '{captcha_token}'; }};
-                                called = true;
+                            // Model Angular credentials.turnstileToken
+                            var scope = angular.element(document.querySelector('session-login')).scope();
+                            if (scope) {{
+                                scope.$apply(function() {{
+                                    scope.credentials = scope.credentials || {{}};
+                                    scope.credentials.turnstileToken = '{captcha_token}';
+                                }});
+                                return true;
                             }}
-
-                            // Chercher le callback dans les widgets reCAPTCHA
-                            if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {{
-                                var clients = window.___grecaptcha_cfg.clients;
-                                for (var key in clients) {{
-                                    var client = clients[key];
-                                    for (var k in client) {{
-                                        if (client[k] && typeof client[k].callback === 'function') {{
-                                            try {{ client[k].callback('{captcha_token}'); called = true; }} catch(e) {{}}
-                                        }}
-                                        if (client[k] && client[k].aa && typeof client[k].aa.callback === 'function') {{
-                                            try {{ client[k].aa.callback('{captcha_token}'); called = true; }} catch(e) {{}}
-                                        }}
-                                    }}
-                                }}
-                            }}
-                            return called;
+                            return false;
                         }})()
                     """)
-                    logger.info(f"[Booker Chrono] Token injecte, callback appele: {{injected}}")
-                    await page.wait_for_timeout(1000)
+                    logger.info(f"[Booker Chrono] Turnstile token injecte: {injected}")
+                    await page.wait_for_timeout(500)
                 else:
                     logger.warning(f"[Booker Chrono] Pas de token — tentative sans captcha")
             else:
                 logger.info(f"[Booker Chrono] Pas de clé 2captcha configurée")
 
             # Soumettre le formulaire
-            login_btn = await page.query_selector("button:has-text('Log in'), button[type='submit']")
+            login_btn = await page.query_selector("button:has-text('S\'identifier'), button:has-text('Log in'), button[type='submit']")
             if login_btn:
                 await login_btn.click()
             else:
                 await pwd_field.press("Enter")
 
+            # Attendre que le popup disparaisse ou que la page change
             try:
-                await page.wait_for_function("window.location.href.indexOf('/login') === -1", timeout=20000)
+                await page.wait_for_function(
+                    "!document.querySelector('.session-lightbox.active, .modal.active') || document.querySelector('.user-logged-in')",
+                    timeout=20000
+                )
             except Exception:
                 await page.wait_for_timeout(5000)
 
             logger.info(f"[Booker Chrono] Apres login: {page.url}")
-            if "login" in page.url.lower():
+            page_content = await page.content()
+            if "Se connecter" in page_content and "S\'identifier" not in page_content:
                 await browser.close()
-                return {"succes": False, "message": "Login Chronogolf échoué (reCAPTCHA ou identifiants)."}
+                return {"succes": False, "message": "Login Chronogolf échoué."}
 
             # ── Page booking ──────────────────────────────────
             booking_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
