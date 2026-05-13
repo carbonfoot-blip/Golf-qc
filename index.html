@@ -1290,7 +1290,7 @@ async function capturerSessionChrono() {
       mettreAJourStatusProfil();
       if (chronoWindow && !chronoWindow.closed) chronoWindow.close();
     } else {
-      afficherToast('❌ Session non trouvée — connectez-vous d'abord sur Chronogolf', true);
+      afficherToast('❌ Session non trouvée — connectez-vous sur Chronogolf', true);
     }
   } catch(e) {
     afficherToast('❌ Erreur de connexion', true);
