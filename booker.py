@@ -398,17 +398,16 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             cookie_names = [c['name'] for c in all_cookies]
             logger.info(f"[Booker Chrono] Cookies apres login: {cookie_names}")
 
-            # ── Page booking ──────────────────────────────────
-            booking_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
-            await page.goto(booking_url, timeout=TIMEOUT, wait_until="networkidle")
-            await page.wait_for_timeout(5000)
-            logger.info(f"[Booker Chrono] Booking URL finale: {page.url}")
-            logger.info(f"[Booker Chrono] Booking HTML size: {len(await page.content())}")
+            # ── Page club pour obtenir CSRF Angular ───────────
+            club_url = f"https://www.chronogolf.ca/club/{slug}"
+            await page.goto(club_url, timeout=TIMEOUT, wait_until="networkidle")
+            await page.wait_for_timeout(4000)
+            logger.info(f"[Booker Chrono] Club URL: {page.url} — {len(await page.content())} chars")
 
             csrf_token = await page.evaluate(
                 "angular?.element(document)?.injector()?.get('$http')?.defaults?.headers?.common?.['X-CSRF-Token'] || ''"
             )
-            logger.info(f"[Booker Chrono] CSRF: {'oui — ' + csrf_token[:20] if csrf_token else 'non'}")
+            logger.info(f"[Booker Chrono] CSRF: {'oui' if csrf_token else 'non'}")
 
             # ── GET teetimes via fetch JS ─────────────────────
             teetimes_url = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
@@ -443,6 +442,19 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             if not teetime_id:
                 await browser.close()
                 return {"succes": False, "message": f"Le depart de {heure} n'est plus disponible.", "url_fallback": url_base}
+
+            # Naviguer vers la page booking avec teetime_id pour etablir la session complete
+            booking_with_teetime = f"https://www.chronogolf.ca/club/{slug}/booking?teetime_id={teetime_id}&source=chronogolf&medium=profile"
+            await page.goto(booking_with_teetime, timeout=TIMEOUT, wait_until="networkidle")
+            await page.wait_for_timeout(4000)
+            logger.info(f"[Booker Chrono] Booking URL: {page.url} — {len(await page.content())} chars")
+
+            csrf_token2 = await page.evaluate(
+                "angular?.element(document)?.injector()?.get('$http')?.defaults?.headers?.common?.['X-CSRF-Token'] || ''"
+            )
+            if csrf_token2:
+                csrf_token = csrf_token2
+            logger.info(f"[Booker Chrono] CSRF booking: {'oui' if csrf_token else 'non'}")
 
             # ── POST reservation via fetch JS ─────────────────
             rounds = [{"affiliation_type_id": affiliation_id, "guest": None, "state": "reserved"} for _ in range(nb_joueurs)]
