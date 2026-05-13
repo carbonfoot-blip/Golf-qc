@@ -320,6 +320,11 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             if not teetime_id:
                 return {"succes": False, "message": f"Le depart de {heure} n'est plus disponible.", "url_fallback": url_base}
 
+            # Visiter la page de booking pour obtenir le cookie teetime_freeze
+            booking_page_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
+            booking_resp = await client.get(booking_page_url)
+            logger.info(f"[Booker Chrono] Page booking: {booking_resp.status_code} — cookies: {list(client.cookies.keys())}")
+
             # POST reservation — essayer avec X-Requested-With au lieu de CSRF
             booking_referer = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
             res_headers = {
