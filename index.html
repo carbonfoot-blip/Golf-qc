@@ -1436,14 +1436,18 @@ function supprimerFavori(id) {
 
 function utiliserFavori(favori) {
   // Trouver le prochain jour correspondant
-  const today = new Date();
-  let target = new Date(today);
-  const todayDay = today.getDay();
+  // Utiliser la date locale pour éviter les problèmes de fuseau horaire
+  const now = new Date();
+  const todayDay = now.getDay(); // 0=dim, 1=lun...6=sam
   let daysAhead = (favori.jour - todayDay + 7) % 7;
-  if (daysAhead === 0) daysAhead = 7; // Toujours le prochain, pas aujourd'hui
+  if (daysAhead === 0) daysAhead = 7; // Si aujourd'hui = jour favori → semaine prochaine
 
-  target.setDate(today.getDate() + daysAhead);
-  const dateStr = target.toISOString().split('T')[0];
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysAhead);
+  // Format YYYY-MM-DD en heure locale (pas UTC)
+  const yyyy = target.getFullYear();
+  const mm = String(target.getMonth() + 1).padStart(2, '0');
+  const dd = String(target.getDate()).padStart(2, '0');
+  const dateStr = `${yyyy}-${mm}-${dd}`;
 
   // Appliquer au formulaire
   document.getElementById('sel-region').value    = favori.region;
