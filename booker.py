@@ -359,7 +359,7 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             }
 
             res_resp = await client.post(
-                "https://www.chronogolf.com/marketplace/reservations",
+                "https://www.chronogolf.ca/marketplace/reservations",
                 json=payload,
             )
             logger.info(f"[Booker Chrono] Reservation: {res_resp.status_code}")
