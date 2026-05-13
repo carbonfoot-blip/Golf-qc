@@ -285,7 +285,7 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
     affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
     url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
-    login_url = "https://www.chronogolf.com/login"  # .com pour OIDC
+    login_url = "https://www.chronogolf.com/login"
 
     logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure}")
 
@@ -395,12 +395,10 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 await browser.close()
                 return {"succes": False, "message": "Login Chronogolf échoué."}
 
-            # Logger TOUS les cookies (Playwright peut lire les httponly)
+            # Logger les cookies de session
             all_cookies = await context.cookies()
             cookie_names = [c['name'] for c in all_cookies]
-            oidc_cookies = [c for c in all_cookies if 'oidc' in c['name'].lower() or 'ls' in c['name'].lower()]
             logger.info(f"[Booker Chrono] Cookies apres login: {cookie_names}")
-            logger.info(f"[Booker Chrono] Cookies OIDC: {[(c['name'], c['value'][:20]) for c in oidc_cookies]}")
 
             # ── Page club pour obtenir CSRF Angular ───────────
             club_url = f"https://www.chronogolf.ca/club/{slug}"
