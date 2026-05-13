@@ -285,7 +285,7 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
     affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
     url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
-    login_url = "https://www.chronogolf.com/login"
+    login_url = "https://www.chronogolf.ca/fr"  # popup login sur .ca (Turnstile fonctionne)
 
     logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure}")
 
@@ -379,21 +379,28 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                     await page.wait_for_timeout(1000)
 
             # Soumettre
-            login_btn = await page.query_selector("button[type='submit'], input[type='submit']")
+            login_btn = await page.query_selector("button[type='submit'], input[type='submit'], button.btn-submit")
             if login_btn:
                 await login_btn.click()
             else:
                 await pwd_field.press("Enter")
 
+            # Sur .ca, attendre que le popup de login disparaisse
             try:
-                await page.wait_for_function("window.location.href.indexOf('/login') === -1", timeout=20000)
+                await page.wait_for_function(
+                    "!document.querySelector('.session-lightbox.ng-scope.active')",
+                    timeout=20000
+                )
             except Exception:
                 await page.wait_for_timeout(5000)
 
             logger.info(f"[Booker Chrono] Apres login: {page.url}")
-            if "login" in page.url.lower():
+            # Sur .ca, succès = rester sur /fr ou /dashboard (pas /login)
+            page_content_login = await page.content()
+            if "Se connecter" in page_content_login and "session-lightbox" in page_content_login:
                 await browser.close()
                 return {"succes": False, "message": "Login Chronogolf échoué."}
+            logger.info(f"[Booker Chrono] Login .ca réussi!")
 
             # Logger les cookies de session
             all_cookies = await context.cookies()
