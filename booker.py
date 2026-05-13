@@ -285,7 +285,7 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
     affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
     url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
-    login_url = "https://www.chronogolf.ca/fr"  # popup login sur .ca
+    login_url = "https://www.chronogolf.com/login"
 
     logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure}")
 
@@ -314,18 +314,11 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             await page.goto(login_url, timeout=TIMEOUT, wait_until="networkidle")
             await page.wait_for_timeout(2000)
 
-            # Sitekey Cloudflare Turnstile de chronogolf.ca (fixe)
+            # Sitekey Cloudflare Turnstile (même sur .com et .ca)
             site_key = "0x4AAAAAAB4i_hVoLpRMv5pk"
-            logger.info(f"[Booker Chrono] Turnstile sitekey: {site_key}")
+            logger.info(f"[Booker Chrono] Login sur: {login_url}")
 
-            # Attendre que le popup de login apparaisse sur .ca
-            await page.wait_for_timeout(2000)
-            # Cliquer "Se connecter" si pas encore ouvert
-            login_trigger = await page.query_selector("a:has-text('Se connecter'), button:has-text('Se connecter')")
-            if login_trigger:
-                await login_trigger.click()
-                await page.wait_for_timeout(1500)
-
+            # Sur .com, pas de popup — formulaire direct
             email_field = await page.query_selector("input[name='email'], input[id='sessionEmail'], input[type='email']")
             pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword'], input[type='password']")
 
@@ -345,14 +338,10 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 logger.info(f"[Booker Chrono] Résolution Turnstile via 2captcha")
                 captcha_token = await _solve_turnstile(site_key, login_url)
                 if captcha_token:
-                    # Injecter le token Turnstile dans le champ Angular
                     injected = await page.evaluate(f"""
                         (function() {{
-                            // Champ hidden cf-turnstile-response
                             var fields = document.querySelectorAll('[name="cf-turnstile-response"]');
                             fields.forEach(function(f) {{ f.value = '{captcha_token}'; }});
-
-                            // Model Angular credentials.turnstileToken
                             var scope = angular.element(document.querySelector('session-login')).scope();
                             if (scope) {{
                                 scope.$apply(function() {{
@@ -366,30 +355,21 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                     """)
                     logger.info(f"[Booker Chrono] Turnstile token injecte: {injected}")
                     await page.wait_for_timeout(500)
-                else:
-                    logger.warning(f"[Booker Chrono] Pas de token — tentative sans captcha")
-            else:
-                logger.info(f"[Booker Chrono] Pas de clé 2captcha configurée")
 
-            # Soumettre le formulaire
+            # Soumettre
             login_btn = await page.query_selector("button[type='submit'], input[type='submit']")
             if login_btn:
                 await login_btn.click()
             else:
                 await pwd_field.press("Enter")
 
-            # Attendre que le popup disparaisse ou que la page change
             try:
-                await page.wait_for_function(
-                    "!document.querySelector('.session-lightbox.active, .modal.active') || document.querySelector('.user-logged-in')",
-                    timeout=20000
-                )
+                await page.wait_for_function("window.location.href.indexOf('/login') === -1", timeout=20000)
             except Exception:
                 await page.wait_for_timeout(5000)
 
             logger.info(f"[Booker Chrono] Apres login: {page.url}")
-            page_content = await page.content()
-            if "Se connecter" in page_content and "S\'identifier" not in page_content:
+            if "login" in page.url.lower():
                 await browser.close()
                 return {"succes": False, "message": "Login Chronogolf échoué."}
 
