@@ -327,14 +327,27 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             logger.warning(f"[Booker Chrono] CSRF/cookies: {e}")
 
         # ── Étape 3-5 : API avec cookies frais et CSRF ───────
+        slug_booking = slug.replace("_", "-")
+        booking_referer = f"https://www.chronogolf.ca/club/{slug_booking}/booking/?source=chronogolf&medium=profile"
+
+        post_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": "https://www.chronogolf.ca",
+            "Referer": booking_referer,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+        }
         if csrf_token:
-            headers["X-Csrf-Token"] = csrf_token
+            post_headers["X-Csrf-Token"] = csrf_token
 
         async with httpx.AsyncClient(
             timeout=HTTP_TIMEOUT,
             follow_redirects=True,
             cookies=fresh_cookies,
-            headers=headers,
+            headers=post_headers,
         ) as client:
 
             # ── Étape 2 : GET teetimes pour trouver teetime_id ──
