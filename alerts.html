@@ -316,8 +316,10 @@ async function toggleLogs(alertId) {
       return;
     }
     el.innerHTML = logs.map(log => {
-      const dateF = new Date(log.verifie_le).toLocaleString('fr-CA', {
-        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit'
+      // Les timestamps sont en UTC — convertir en heure locale
+      const dateF = new Date(log.verifie_le + 'Z').toLocaleString('fr-CA', {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit',
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
       });
       return `<div class="log-item">
         <span class="log-badge ${log.statut}">${log.statut}</span>
