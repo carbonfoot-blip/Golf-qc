@@ -334,6 +334,12 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             }
             client.headers.update(res_headers)
 
+            # Construire rounds_attributes — une entree par joueur
+            rounds = [
+                {"affiliation_type_id": affiliation_id, "guest": None, "state": "reserved"}
+                for _ in range(nb_joueurs)
+            ]
+
             payload = {
                 "reservation": {
                     "club_id": club_id,
@@ -342,7 +348,9 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     "holes": 18,
                     "medium": "profile",
                     "source": "chronogolf",
-                    "rounds_attributes": [{"affiliation_type_id": affiliation_id, "state": "reserved"}],
+                    "booking_engine": 1,
+                    "made_online": True,
+                    "rounds_attributes": rounds,
                 }
             }
 
