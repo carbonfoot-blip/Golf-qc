@@ -828,16 +828,23 @@
 
       <!-- Credentials manquants -->
       <div id="modal-resa-no-creds" style="display:none">
-        <div style="background:var(--amber-light);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:#7a5000;margin-bottom:1rem">
-          ⚠️ Aucun identifiant sauvegardé pour ce système. Entrez vos credentials ci-dessous ou sauvegardez-les dans votre <strong>Profil</strong>.
+        <div id="modal-resa-no-creds-ggg">
+          <div style="background:var(--amber-light);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:#7a5000;margin-bottom:1rem">
+            ⚠️ Aucun identifiant GGG sauvegardé. Entrez-les ci-dessous ou dans votre <strong>Profil</strong>.
+          </div>
+          <div class="modal-field">
+            <label>Identifiant / Courriel</label>
+            <input type="text" id="resa-username-inline" placeholder="votre@email.com" autocomplete="username"/>
+          </div>
+          <div class="modal-field">
+            <label>Mot de passe</label>
+            <input type="password" id="resa-password-inline" placeholder="••••••••" autocomplete="current-password"/>
+          </div>
         </div>
-        <div class="modal-field">
-          <label>Identifiant / Courriel</label>
-          <input type="text" id="resa-username-inline" placeholder="votre@email.com" autocomplete="username"/>
-        </div>
-        <div class="modal-field">
-          <label>Mot de passe</label>
-          <input type="password" id="resa-password-inline" placeholder="••••••••" autocomplete="current-password"/>
+        <div id="modal-resa-no-creds-chrono" style="display:none">
+          <div style="background:var(--amber-light);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:#7a5000;margin-bottom:1rem">
+            ⚠️ Session Chronogolf non configurée. Allez dans votre <strong>Profil → Connecter Chronogolf</strong>.
+          </div>
         </div>
       </div>
 
@@ -903,19 +910,19 @@
     <div style="margin-bottom:1.5rem">
       <div style="font-weight:600;font-size:.875rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem">
         <span class="badge badge-chrono">Chronogolf</span>
-        <span id="chrono-status" style="font-size:.75rem;color:var(--green-700)"></span>
+        <span id="chrono-status" style="font-size:.75rem"></span>
       </div>
-      <div class="modal-field">
-        <label>Identifiant / Courriel</label>
-        <input type="text" id="profil-chrono-user" placeholder="votre@email.com" autocomplete="username"/>
-      </div>
-      <div class="modal-field">
-        <label>Mot de passe</label>
-        <input type="password" id="profil-chrono-pwd" placeholder="••••••••" autocomplete="new-password"/>
+      <div id="chrono-session-info" style="font-size:.8rem;padding:.625rem .75rem;border-radius:8px;margin-bottom:.75rem;background:var(--sand)">
+        <span id="chrono-session-text">○ Non connecté — cliquez pour connecter</span>
       </div>
       <div style="display:flex;gap:.5rem">
-        <button class="btn-confirm" style="flex:1;padding:.5rem .875rem;font-size:.8rem" onclick="sauvegarderCredentials('chrono')">💾 Sauvegarder</button>
-        <button class="btn-cancel" style="padding:.5rem .875rem;font-size:.8rem" onclick="effacerCredentials('chrono')">🗑 Effacer</button>
+        <button class="btn-confirm" style="flex:1;padding:.5rem .875rem;font-size:.8rem" onclick="ouvrirChronoAuth()">
+          🔗 Connecter Chronogolf
+        </button>
+        <button class="btn-cancel" style="padding:.5rem .875rem;font-size:.8rem" onclick="effacerSessionChrono()">🗑</button>
+      </div>
+      <div style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem">
+        Ouvre Chronogolf dans un nouvel onglet. Connectez-vous, puis revenez et cliquez "J'ai terminé".
       </div>
     </div>
 
@@ -1243,9 +1250,42 @@ function effacerCredentials(systeme) {
   const creds = getCredentials();
   creds[systeme] = null;
   localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
-  document.getElementById(`profil-${systeme}-user`).value = '';
-  document.getElementById(`profil-${systeme}-pwd`).value = '';
-  afficherToast(`Identifiants ${systeme === 'ggg' ? 'GGG Golf' : 'Chronogolf'} effacés`);
+  if (systeme === 'ggg') {
+    document.getElementById('profil-ggg-user').value = '';
+    document.getElementById('profil-ggg-pwd').value = '';
+  }
+  afficherToast(`Identifiants GGG Golf effacés`);
+  mettreAJourStatusProfil();
+}
+
+// ── Session Chronogolf ────────────────────────────
+function ouvrirChronoAuth() {
+  const authWin = window.open('/chrono-auth', 'chrono_auth', 'width=520,height=500,left=200,top=100');
+
+  // Écouter le message de retour
+  window.addEventListener('message', function onMessage(e) {
+    if (e.data && e.data.type === 'CHRONO_SESSION') {
+      window.removeEventListener('message', onMessage);
+      const creds = getCredentials();
+      creds.chronoSession = {
+        session: e.data.session,
+        cf_clearance: e.data.cf_clearance,
+        email: e.data.email,
+        expire_at: e.data.expire_at,
+      };
+      localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+      afficherToast(`✅ Chronogolf connecté — ${e.data.email}`);
+      mettreAJourStatusProfil();
+      if (authWin && !authWin.closed) authWin.close();
+    }
+  });
+}
+
+function effacerSessionChrono() {
+  const creds = getCredentials();
+  delete creds.chronoSession;
+  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+  afficherToast('Session Chronogolf effacée');
   mettreAJourStatusProfil();
 }
 
@@ -1280,7 +1320,22 @@ function mettreAJourStatusProfil() {
   const chronoStatus = document.getElementById('chrono-status');
   const emailStatus  = document.getElementById('email-notif-status');
   if (gggStatus)    gggStatus.textContent    = creds.ggg    ? `✅ ${creds.ggg.username}`    : '○ Non configuré';
-  if (chronoStatus) chronoStatus.textContent = creds.chrono ? `✅ ${creds.chrono.username}` : '○ Non configuré';
+  // Statut session Chronogolf
+  const chronoSessionInfo = document.getElementById('chrono-session-info');
+  const chronoSessionText = document.getElementById('chrono-session-text');
+  if (chronoSessionText) {
+    const cs = creds.chronoSession;
+    if (cs && cs.expire_at && Date.now() < cs.expire_at) {
+      const heuresRestantes = Math.round((cs.expire_at - Date.now()) / 3600000);
+      chronoSessionText.textContent = `✅ Connecté: ${cs.email || 'utilisateur'} (expire dans ~${heuresRestantes}h)`;
+      if (chronoSessionInfo) chronoSessionInfo.style.background = 'var(--green-50)';
+      if (chronoStatus) chronoStatus.textContent = '✅';
+    } else {
+      chronoSessionText.textContent = '○ Non connecté — cliquez pour connecter';
+      if (chronoSessionInfo) chronoSessionInfo.style.background = 'var(--sand)';
+      if (chronoStatus) chronoStatus.textContent = '';
+    }
+  }
   if (emailStatus)  emailStatus.textContent  = creds.notifEmail ? `✅ ${creds.notifEmail}` : '○ Non configuré';
 
   // Pré-remplir le champ email notif si sauvegardé
@@ -1340,16 +1395,35 @@ function ouvrirModalReservation(terrainId, terrainNom, date, heure, joueurs, con
 
   const noCredsEl   = document.getElementById('modal-resa-no-creds');
   const hasCredsEl  = document.getElementById('modal-resa-has-creds');
+  const noCredsGgg = document.getElementById('modal-resa-no-creds-ggg');
+  const noCred​sChrono = document.getElementById('modal-resa-no-creds-chrono');
 
-  if (credSysteme) {
-    noCredsEl.style.display  = 'none';
-    hasCredsEl.style.display = 'block';
-    hasCredsEl.textContent   = `✅ Connecté en tant que ${credSysteme.username}`;
+  if (systeme === 'chronogolf') {
+    const cs = creds.chronoSession;
+    const sessionValide = cs && cs.session && Date.now() < cs.expire_at;
+    if (sessionValide) {
+      noCredsEl.style.display  = 'none';
+      hasCredsEl.style.display = 'block';
+      hasCredsEl.textContent   = `✅ Session Chronogolf active — ${cs.email || 'connecté'}`;
+    } else {
+      noCredsEl.style.display  = 'block';
+      hasCredsEl.style.display = 'none';
+      if (noCredsGgg) noCredsGgg.style.display = 'none';
+      if (noCred​sChrono) noCred​sChrono.style.display = 'block';
+    }
   } else {
-    noCredsEl.style.display  = 'block';
-    hasCredsEl.style.display = 'none';
-    document.getElementById('resa-username-inline').value = '';
-    document.getElementById('resa-password-inline').value = '';
+    if (noCredsGgg) noCredsGgg.style.display = 'block';
+    if (noCred​sChrono) noCred​sChrono.style.display = 'none';
+    if (credSysteme) {
+      noCredsEl.style.display  = 'none';
+      hasCredsEl.style.display = 'block';
+      hasCredsEl.textContent   = `✅ Connecté en tant que ${credSysteme.username}`;
+    } else {
+      noCredsEl.style.display  = 'block';
+      hasCredsEl.style.display = 'none';
+      document.getElementById('resa-username-inline').value = '';
+      document.getElementById('resa-password-inline').value = '';
+    }
   }
 
   // Reset états
@@ -1374,16 +1448,29 @@ async function confirmerReservation() {
   const credSysteme = systeme === 'gggolf' ? creds.ggg : creds.chrono;
 
   let username, password;
+  const systeme = pendingReservation.systeme;
 
-  if (credSysteme) {
-    username = credSysteme.username;
-    password = credSysteme.password;
-  } else {
-    username = document.getElementById('resa-username-inline').value.trim();
-    password = document.getElementById('resa-password-inline').value.trim();
-    if (!username || !password) {
-      afficherToast('Veuillez entrer vos identifiants', true);
+  if (systeme === 'chronogolf') {
+    // Pour Chronogolf, utiliser les cookies de session sauvegardés
+    const cs = creds.chronoSession;
+    if (!cs || !cs.session || Date.now() > cs.expire_at) {
+      afficherToast('Session Chronogolf expirée. Reconnectez-vous dans votre Profil.', true);
       return;
+    }
+    username = cs.session;    // _chronogolf_session cookie
+    password = cs.cf_clearance; // cf_clearance cookie
+  } else {
+    // GGG Golf — credentials classiques
+    if (credSysteme) {
+      username = credSysteme.username;
+      password = credSysteme.password;
+    } else {
+      username = document.getElementById('resa-username-inline').value.trim();
+      password = document.getElementById('resa-password-inline').value.trim();
+      if (!username || !password) {
+        afficherToast('Veuillez entrer vos identifiants', true);
+        return;
+      }
     }
   }
 

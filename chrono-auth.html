@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Connexion Chronogolf</title>
+<style>
+  body { font-family: 'DM Sans', sans-serif; max-width: 500px; margin: 60px auto; padding: 0 1rem; text-align: center; background: #f5f7f2; }
+  h2 { color: #1a3a1f; }
+  .status { padding: 1rem 1.5rem; border-radius: 10px; margin: 1.5rem 0; font-size: .95rem; }
+  .status.ok { background: #eef7ef; border: 1.5px solid #7ab885; color: #1a3a1f; }
+  .status.error { background: #fef2f2; border: 1.5px solid #f87171; color: #7f1d1d; }
+  .status.waiting { background: #fff8e1; border: 1.5px solid #fbbf24; color: #78350f; }
+  .btn { display: inline-block; background: #1a3a1f; color: white; padding: .75rem 1.5rem; border-radius: 8px; text-decoration: none; font-weight: 600; cursor: pointer; border: none; font-size: 1rem; font-family: inherit; margin: .5rem; }
+  .btn-secondary { background: transparent; border: 1.5px solid #1a3a1f; color: #1a3a1f; }
+</style>
+</head>
+<body>
+<h2>⛳ Connexion Chronogolf</h2>
+
+<div id="status" class="status waiting">
+  ⏳ Vérification de votre session Chronogolf...
+</div>
+
+<div id="actions">
+  <a href="https://www.chronogolf.com/login" target="_blank" class="btn" id="btn-login">
+    Se connecter sur Chronogolf
+  </a>
+  <br><br>
+  <button class="btn btn-secondary" onclick="verifierSession()">
+    ✅ J'ai terminé — Vérifier la session
+  </button>
+</div>
+
+<div id="result" style="display:none">
+  <button class="btn" onclick="window.close()">Fermer cette fenêtre</button>
+</div>
+
+<script>
+const GOLF_APP_ORIGIN = window.location.origin;
+
+async function verifierSession() {
+  document.getElementById('status').className = 'status waiting';
+  document.getElementById('status').textContent = '⏳ Lecture des cookies Chronogolf...';
+
+  try {
+    // Appel au backend pour lire les cookies Chronogolf depuis cette page
+    const resp = await fetch('/api/chrono-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json();
+
+    if (data.valide) {
+      document.getElementById('status').className = 'status ok';
+      document.getElementById('status').innerHTML =
+        `✅ Connecté en tant que <strong>${data.email || 'utilisateur'}</strong><br>
+         Session valide pour ~${data.duree_heures || 24} heures`;
+
+      // Envoyer les données au parent (app principale)
+      if (window.opener) {
+        window.opener.postMessage({
+          type: 'CHRONO_SESSION',
+          session: data.session,
+          cf_clearance: data.cf_clearance,
+          email: data.email,
+          expire_at: Date.now() + (data.duree_heures || 24) * 3600 * 1000,
+        }, GOLF_APP_ORIGIN);
+      }
+
+      document.getElementById('actions').style.display = 'none';
+      document.getElementById('result').style.display = 'block';
+    } else {
+      document.getElementById('status').className = 'status error';
+      document.getElementById('status').textContent =
+        '❌ Pas de session active. Connectez-vous sur Chronogolf puis revenez ici.';
+    }
+  } catch(e) {
+    document.getElementById('status').className = 'status error';
+    document.getElementById('status').textContent = '❌ Erreur de communication. Réessayez.';
+  }
+}
+
+// Vérifier automatiquement au chargement
+verifierSession();
+</script>
+</body>
+</html>
