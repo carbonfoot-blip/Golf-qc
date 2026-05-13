@@ -1442,11 +1442,13 @@ function utiliserFavori(favori) {
   let daysAhead = (favori.jour - todayDay + 7) % 7;
   if (daysAhead === 0) daysAhead = 7; // Si aujourd'hui = jour favori → semaine prochaine
 
-  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysAhead);
-  // Format YYYY-MM-DD en heure locale (pas UTC)
-  const yyyy = target.getFullYear();
-  const mm = String(target.getMonth() + 1).padStart(2, '0');
-  const dd = String(target.getDate()).padStart(2, '0');
+  // Construire la date cible sans setDate pour eviter les bugs de mois
+  const targetTs = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  targetTs.setDate(targetTs.getDate() + daysAhead);
+  // Format YYYY-MM-DD en heure locale (pas UTC — toISOString() decale en UTC)
+  const yyyy = targetTs.getFullYear();
+  const mm = String(targetTs.getMonth() + 1).padStart(2, '0');
+  const dd = String(targetTs.getDate()).padStart(2, '0');
   const dateStr = `${yyyy}-${mm}-${dd}`;
 
   // Appliquer au formulaire
@@ -1457,7 +1459,7 @@ function utiliserFavori(favori) {
 
   fermerModalFavoris();
 
-  const dateF = target.toLocaleDateString('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' });
+  const dateF = targetTs.toLocaleDateString('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' });
   afficherToast(`✅ ${JOURS_FR[favori.jour]} ${favori.debut}–${favori.fin} · ${dateF}`);
 }
 
