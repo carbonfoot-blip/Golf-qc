@@ -318,14 +318,41 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 logger.info(f"[Booker Chrono] Résolution reCAPTCHA v3 via 2captcha (key={captcha_site_key[:20]})")
                 captcha_token = await _solve_recaptcha_v3(captcha_site_key, login_url, "login")
                 if captcha_token:
-                    await page.evaluate(f"""
-                        // Injecter pour v2
-                        var el = document.getElementById('g-recaptcha-response');
-                        if (el) el.value = '{captcha_token}';
-                        // Pour v3 Angular
-                        window.__recaptcha_token = '{captcha_token}';
+                    injected = await page.evaluate(f"""
+                        (function() {{
+                            // Injecter dans le champ standard
+                            var el = document.getElementById('g-recaptcha-response');
+                            if (el) {{ el.value = '{captcha_token}'; el.style.display = 'block'; }}
+
+                            // Trouver et appeler le callback Angular reCAPTCHA
+                            var called = false;
+                            if (window.grecaptcha) {{
+                                // Override getResponse pour retourner notre token
+                                var orig = window.grecaptcha.getResponse;
+                                window.grecaptcha.getResponse = function() {{ return '{captcha_token}'; }};
+                                called = true;
+                            }}
+
+                            // Chercher le callback dans les widgets reCAPTCHA
+                            if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {{
+                                var clients = window.___grecaptcha_cfg.clients;
+                                for (var key in clients) {{
+                                    var client = clients[key];
+                                    for (var k in client) {{
+                                        if (client[k] && typeof client[k].callback === 'function') {{
+                                            try {{ client[k].callback('{captcha_token}'); called = true; }} catch(e) {{}}
+                                        }}
+                                        if (client[k] && client[k].aa && typeof client[k].aa.callback === 'function') {{
+                                            try {{ client[k].aa.callback('{captcha_token}'); called = true; }} catch(e) {{}}
+                                        }}
+                                    }}
+                                }}
+                            }}
+                            return called;
+                        }})()
                     """)
-                    logger.info(f"[Booker Chrono] Token reCAPTCHA injecté")
+                    logger.info(f"[Booker Chrono] Token injecte, callback appele: {{injected}}")
+                    await page.wait_for_timeout(1000)
                 else:
                     logger.warning(f"[Booker Chrono] Pas de token — tentative sans captcha")
             else:
