@@ -472,33 +472,39 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 (async () => {{
                     const r = await fetch('https://www.chronogolf.ca/marketplace/reservations', {{
                         method: 'POST',
-                        credentials: 'include',
+                        credentials: 'same-origin',
                         headers: {{
                             'Accept': 'application/json, text/plain, */*',
                             'Content-Type': 'application/json',
                             'X-CSRF-Token': '{csrf_token}',
-                            'X-Requested-With': 'XMLHttpRequest'
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Sec-Fetch-Site': 'same-origin',
+                            'Sec-Fetch-Mode': 'cors',
+                            'Sec-Fetch-Dest': 'empty'
                         }},
                         body: '{payload_str}'
                     }});
+                    const status = r.status;
                     const text = await r.text();
-                    return JSON.stringify({{status: r.status, body: text.substring(0, 500)}});
+                    // Verifier si on a du JSON
+                    const isJson = text.trim().startsWith('{{');
+                    return JSON.stringify({{status: status, body: text.substring(0, 500), isJson: isJson}});
                 }})()
             """)
 
             result = _json.loads(res_result) if res_result else {}
             status = result.get("status", 0)
             body = result.get("body", "")
-            logger.info(f"[Booker Chrono] POST: {status} — {body[:200]}")
+            is_json = body.strip().startswith("{")
+            logger.info(f"[Booker Chrono] POST: {status} isJson={is_json} — {body[:300]}")
             await browser.close()
 
-            if status in [200, 201]:
-                # Vérifier que c'est du JSON avec un ID (pas du HTML)
-                if body.strip().startswith("{") and '"id"' in body:
-                    return {"succes": True, "message": "Réservation Chronogolf confirmée! Vérifiez votre courriel."}
-                elif body.strip().startswith("<"):
-                    return {"succes": False, "message": "Session insuffisante.", "url_fallback": url_base}
+            if status in [200, 201] and is_json and '"id"' in body:
                 return {"succes": True, "message": "Réservation Chronogolf confirmée! Vérifiez votre courriel."}
+
+            if status in [200, 201] and not is_json:
+                logger.warning(f"[Booker Chrono] HTML recu — cookies OIDC manquants")
+                return {"succes": False, "message": "Session insuffisante. Réessayez.", "url_fallback": url_base}
 
             return {"succes": False, "message": f"Erreur Chronogolf ({status}).", "url_fallback": url_base}
 
