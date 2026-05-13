@@ -139,7 +139,6 @@ async def _reserver_gggolf(
 
             search_content = await page.content()
             logger.info(f"[Booker GGG] Resultats recherche: {len(search_content)} chars — URL: {page.url}")
-	    logger.info(f"[Booker GGG] HTML[5000:7000]: {html[5000:7000]}")
 
             # ── Étape 3 : Trouver et cliquer sur le départ voulu ──
             found = await _trouver_et_cliquer_depart(page, heure, terrain)
@@ -221,6 +220,7 @@ async def _trouver_et_cliquer_depart(page, heure_cible: str, terrain: dict) -> b
     html = await page.content()
     slug = terrain.get("ggg_slug", terrain["id"])
     logger.info(f"[Booker GGG] Recherche heure {heure_cible} dans {len(html)} chars")
+    logger.info(f"[Booker GGG] HTML[5000:7000]: {html[5000:7000]}")
 
     # Format 1 : teetimes_results-hour (Beloeil)
     bloc_pattern = re.compile(
