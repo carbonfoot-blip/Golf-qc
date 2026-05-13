@@ -285,7 +285,7 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
     affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
     url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
-    login_url = "https://www.chronogolf.ca/fr"  # popup login sur .ca (Turnstile fonctionne)
+    login_url = "https://www.chronogolf.ca/fr"  # login via popup .ca
 
     logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure}")
 
@@ -314,11 +314,21 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             await page.goto(login_url, timeout=TIMEOUT, wait_until="networkidle")
             await page.wait_for_timeout(2000)
 
-            # Sitekey Cloudflare Turnstile (même sur .com et .ca)
             site_key = "0x4AAAAAAB4i_hVoLpRMv5pk"
             logger.info(f"[Booker Chrono] Login sur: {login_url}")
 
-            # Sur .com, pas de popup — formulaire direct
+            # Sur .ca, cliquer "Se connecter" pour ouvrir le popup
+            login_trigger = await page.query_selector(
+                "a[ng-click*='openLightbox'], a[ng-click*='login'], "
+                "button[ng-click*='login'], a:has-text('Se connecter')"
+            )
+            if login_trigger:
+                await login_trigger.click()
+                await page.wait_for_timeout(2000)
+                logger.info(f"[Booker Chrono] Popup login ouvert")
+            else:
+                logger.warning(f"[Booker Chrono] Bouton Se connecter non trouve")
+
             email_field = await page.query_selector("input[name='email'], input[id='sessionEmail'], input[type='email']")
             pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword'], input[type='password']")
 
@@ -379,14 +389,14 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                     await page.wait_for_timeout(1000)
 
             # Soumettre
-            login_btn = await page.query_selector("button[type='submit'], input[type='submit'], button.btn-submit")
+            login_btn = await page.query_selector("button[type='submit'], input[type='submit']")
             if login_btn:
                 await login_btn.click()
             else:
                 await pwd_field.press("Enter")
 
-            # Sur .ca, attendre que le popup de login disparaisse
             try:
+                # Sur .ca, attendre que le popup disparaisse
                 await page.wait_for_function(
                     "!document.querySelector('.session-lightbox.ng-scope.active')",
                     timeout=20000
@@ -395,12 +405,11 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 await page.wait_for_timeout(5000)
 
             logger.info(f"[Booker Chrono] Apres login: {page.url}")
-            # Sur .ca, succès = rester sur /fr ou /dashboard (pas /login)
             page_content_login = await page.content()
-            if "Se connecter" in page_content_login and "session-lightbox" in page_content_login:
+            # Vérifier si login échoué (popup encore visible)
+            if 'session-lightbox' in page_content_login and 'active' in page_content_login and 'Se connecter' in page_content_login:
                 await browser.close()
                 return {"succes": False, "message": "Login Chronogolf échoué."}
-            logger.info(f"[Booker Chrono] Login .ca réussi!")
 
             # Logger les cookies de session
             all_cookies = await context.cookies()
