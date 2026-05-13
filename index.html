@@ -1354,10 +1354,7 @@ function ouvrirProfil() {
     document.getElementById('profil-ggg-user').value = creds.ggg.username;
     document.getElementById('profil-ggg-pwd').value  = '••••••••';
   }
-  if (creds.chrono) {
-    document.getElementById('profil-chrono-user').value = creds.chrono.username;
-    document.getElementById('profil-chrono-pwd').value  = '••••••••';
-  }
+  // Chrono utilise maintenant les cookies de session, pas username/pwd
   mettreAJourStatusProfil();
   document.getElementById('modal-profil').classList.add('open');
 }
