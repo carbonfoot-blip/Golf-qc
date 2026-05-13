@@ -11,6 +11,13 @@ import logging
 import re
 import httpx
 from playwright.async_api import async_playwright, TimeoutError as PwTimeout
+try:
+    from playwright_stealth import stealth_async
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
+    logger_tmp = logging.getLogger(__name__)
+    logger_tmp.warning("playwright-stealth non disponible")
 
 logger = logging.getLogger(__name__)
 TIMEOUT = 30_000
@@ -250,12 +257,20 @@ def _trouver_confirm_url(html: str, heure_cible: str, slug: str) -> str:
 
 
 async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, password: str, date: str = "", heure: str = "", nb_joueurs: int = 2) -> dict:
+    """
+    Flow Chronogolf:
+    1. Playwright login sur chronogolf.com (avec args anti-bot)
+    2. Navigation vers page booking sur chronogolf.ca
+    3. GET teetimes via fetch JS pour trouver teetime_id
+    4. POST reservation via fetch JS (session complete + CSRF + teetime_freeze)
+    """
     slug = terrain.get("chronogolf_slug", terrain["id"])
     club_id = terrain.get("chronogolf_club_id")
     course_id = terrain.get("chronogolf_course_id")
     affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
     url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
+    login_url = "https://www.chronogolf.com/login"
 
     logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure}")
 
@@ -265,52 +280,101 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
     heure_norm = f"{int(heure.split(':')[0]):02d}:{heure.split(':')[1]}" if heure and ":" in heure else ""
 
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "Origin": "https://www.chronogolf.ca",
-            "Referer": "https://www.chronogolf.ca/",
-            "X-Requested-With": "XMLHttpRequest",
-        }
+        import json as _json
 
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False, headers=headers) as client:
-            # Login
-            login_resp = await client.post(
-                "https://www.chronogolf.ca/marketplace/sessions",
-                json={"session": {"email": username, "password": password}},
+        async with async_playwright() as pw:
+            # Args pour reduire l'empreinte bot
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-web-security",
+                ],
             )
-            logger.info(f"[Booker Chrono] Login: {login_resp.status_code}")
-            logger.info(f"[Booker Chrono] Login headers: {dict(login_resp.headers)}")
-            if login_resp.status_code not in [200, 201]:
-                return {"succes": False, "message": "Identifiants Chronogolf incorrects."}
-
-            # CSRF depuis les headers de reponse
-            csrf_token = login_resp.headers.get("X-CSRF-Token", "") or login_resp.headers.get("x-csrf-token", "")
-            logger.info(f"[Booker Chrono] CSRF login headers: '{csrf_token[:30] if csrf_token else ''}'")
-
-            # GET teetimes (follow_redirects=True pour ce GET)
-            tt_resp = await client.get(
-                f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes",
-                params={"date": date, "course_id": str(course_id), "nb_holes": "18",
-                        "nb_players": str(nb_joueurs), "affiliation_type_ids[]": str(affiliation_id)},
-                extensions={"follow_redirects": True},
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                locale="fr-CA",
+                viewport={"width": 1280, "height": 800},
             )
-            logger.info(f"[Booker Chrono] Teetimes: {tt_resp.status_code}")
-            logger.info(f"[Booker Chrono] Teetimes headers: X-CSRF={tt_resp.headers.get('X-CSRF-Token','')[:30]}")
+            await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-            if tt_resp.status_code != 200:
-                return {"succes": False, "message": "Impossible de recuperer les departs.", "url_fallback": url_base}
+            page = await context.new_page()
 
-            # Mettre a jour le CSRF depuis les headers teetimes si disponible
-            tt_csrf = tt_resp.headers.get("X-CSRF-Token", "") or tt_resp.headers.get("x-csrf-token", "")
-            if tt_csrf:
-                csrf_token = tt_csrf
-                logger.info(f"[Booker Chrono] CSRF depuis teetimes: '{csrf_token[:30]}'")
+            # Appliquer stealth pour contourner reCAPTCHA
+            if HAS_STEALTH:
+                await stealth_async(page)
+                logger.info(f"[Booker Chrono] Stealth applique")
 
-            slots = tt_resp.json()
+            # ── Login chronogolf.com ──────────────────────────
+            await page.goto(login_url, timeout=TIMEOUT, wait_until="networkidle")
+            await page.wait_for_timeout(2000)
+
+            email_field = await page.query_selector("input[name='email'], input[id='sessionEmail']")
+            pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword']")
+
+            if not email_field or not pwd_field:
+                await browser.close()
+                return {"succes": False, "message": "Page de connexion Chronogolf introuvable."}
+
+            await email_field.click()
+            await page.wait_for_timeout(300)
+            await email_field.type(username, delay=30)
+            await page.wait_for_timeout(200)
+            await pwd_field.click()
+            await page.wait_for_timeout(200)
+            await pwd_field.type(password, delay=30)
+            await page.wait_for_timeout(500)
+
+            login_btn = await page.query_selector("button:has-text('Log in'), button[type='submit']")
+            if login_btn:
+                await login_btn.click()
+            else:
+                await pwd_field.press("Enter")
+
+            try:
+                await page.wait_for_function("window.location.href.indexOf('/login') === -1", timeout=20000)
+            except Exception:
+                await page.wait_for_timeout(5000)
+
+            logger.info(f"[Booker Chrono] Apres login: {page.url}")
+            if "login" in page.url.lower():
+                await browser.close()
+                return {"succes": False, "message": "Identifiants Chronogolf incorrects ou reCAPTCHA."}
+
+            # ── Navigation page booking chronogolf.ca ─────────
+            booking_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
+            await page.goto(booking_url, timeout=TIMEOUT, wait_until="networkidle")
+            await page.wait_for_timeout(4000)
+            logger.info(f"[Booker Chrono] Booking URL: {page.url} — {len(await page.content())} chars")
+
+            # Extraire CSRF Angular
+            csrf_token = await page.evaluate(
+                "angular?.element(document)?.injector()?.get('$http')?.defaults?.headers?.common?.['X-CSRF-Token'] || ''"
+            )
+            logger.info(f"[Booker Chrono] CSRF: {'oui' if csrf_token else 'non'} — URL: {page.url}")
+
+            # ── GET teetimes via fetch JS ─────────────────────
+            teetimes_url = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
+            params_qs = f"date={date}&course_id={course_id}&nb_holes=18&nb_players={nb_joueurs}&affiliation_type_ids[]={affiliation_id}"
+
+            tt_result = await page.evaluate(f"""
+                (async () => {{
+                    const r = await fetch('{teetimes_url}?{params_qs}', {{
+                        credentials: 'include',
+                        headers: {{'Accept': 'application/json'}}
+                    }});
+                    const d = await r.json();
+                    return JSON.stringify({{status: r.status, data: d}});
+                }})()
+            """)
+
+            tt_data = _json.loads(tt_result) if tt_result else {}
+            slots = tt_data.get("data", [])
             if isinstance(slots, dict):
                 slots = slots.get("tee_times") or slots.get("teetimes") or []
+
+            logger.info(f"[Booker Chrono] {len(slots)} departs, cherche {heure_norm}")
 
             teetime_id = None
             for slot in slots:
@@ -324,14 +388,12 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     break
 
             if not teetime_id:
+                await browser.close()
                 return {"succes": False, "message": f"Le depart de {heure} n'est plus disponible.", "url_fallback": url_base}
 
-            # POST reservation
-            if csrf_token:
-                client.headers["X-CSRF-Token"] = csrf_token
-
+            # ── POST reservation via fetch JS ─────────────────
             rounds = [{"affiliation_type_id": affiliation_id, "guest": None, "state": "reserved"} for _ in range(nb_joueurs)]
-            payload = {
+            payload_str = _json.dumps({
                 "reservation": {
                     "club_id": club_id, "teetime_id": teetime_id,
                     "state": "confirmed", "holes": 18,
@@ -339,27 +401,38 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     "booking_engine": 1, "made_online": True,
                     "rounds_attributes": rounds,
                 }
-            }
+            }).replace("'", "\'")
 
-            res_resp = await client.post("https://www.chronogolf.ca/marketplace/reservations", json=payload)
-            logger.info(f"[Booker Chrono] POST: {res_resp.status_code} — {res_resp.text[:200]}")
-            logger.info(f"[Booker Chrono] POST headers resp: {dict(res_resp.headers)}")
+            res_result = await page.evaluate(f"""
+                (async () => {{
+                    const r = await fetch('https://www.chronogolf.ca/marketplace/reservations', {{
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {{
+                            'Accept': 'application/json, text/plain, */*',
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': '{csrf_token}',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }},
+                        body: '{payload_str}'
+                    }});
+                    const text = await r.text();
+                    return JSON.stringify({{status: r.status, body: text.substring(0, 300)}});
+                }})()
+            """)
 
-            if res_resp.status_code in [200, 201]:
-                try:
-                    body = res_resp.json()
-                    if isinstance(body, dict) and body.get("id"):
-                        return {"succes": True, "message": "Reservation Chronogolf confirmee! Verifiez votre courriel."}
-                except Exception:
-                    pass
-                # Verifier si c'est du HTML (mauvais signe)
-                if res_resp.text.strip().startswith("<"):
-                    logger.warning(f"[Booker Chrono] Recu HTML au lieu de JSON")
-                    return {"succes": False, "message": "Session insuffisante.", "url_fallback": url_base}
-                return {"succes": True, "message": "Reservation confirmee!"}
+            result = _json.loads(res_result) if res_result else {}
+            status = result.get("status", 0)
+            body = result.get("body", "")
+            logger.info(f"[Booker Chrono] POST: {status} — {body[:150]}")
+            await browser.close()
 
-            return {"succes": False, "message": f"Erreur ({res_resp.status_code}).", "url_fallback": url_base}
+            if status in [200, 201]:
+                return {"succes": True, "message": "Reservation Chronogolf confirmee! Verifiez votre courriel."}
+
+            return {"succes": False, "message": f"Erreur Chronogolf ({status}).", "url_fallback": url_base}
 
     except Exception as e:
         logger.error(f"[Booker Chrono] Erreur: {e}")
         return {"succes": False, "message": "Erreur technique Chronogolf.", "url_fallback": url_base}
+
