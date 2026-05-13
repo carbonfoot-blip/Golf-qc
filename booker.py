@@ -139,6 +139,7 @@ async def _reserver_gggolf(
 
             search_content = await page.content()
             logger.info(f"[Booker GGG] Resultats recherche: {len(search_content)} chars — URL: {page.url}")
+	    logger.info(f"[Booker GGG] HTML[5000:7000]: {html[5000:7000]}")
 
             # ── Étape 3 : Trouver et cliquer sur le départ voulu ──
             found = await _trouver_et_cliquer_depart(page, heure, terrain)
