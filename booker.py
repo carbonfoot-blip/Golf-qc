@@ -372,7 +372,7 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 logger.info(f"[Booker Chrono] Pas de clé 2captcha configurée")
 
             # Soumettre le formulaire
-            login_btn = await page.query_selector("button:has-text('S\'identifier'), button:has-text('Log in'), button[type='submit']")
+            login_btn = await page.query_selector("button[type='submit'], input[type='submit']")
             if login_btn:
                 await login_btn.click()
             else:
