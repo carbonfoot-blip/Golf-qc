@@ -32,34 +32,51 @@ async def reserver_depart(
 # ─────────────────────────────────────────────
 
 async def _solve_recaptcha(site_key: str, page_url: str) -> str:
-    """Soumet le reCAPTCHA à 2captcha et retourne le token."""
-    if not TWOCAPTCHA_KEY:
-        logger.warning("[2captcha] Pas de clé API")
-        return ""
+    return await _solve_recaptcha_v3(site_key, page_url, "login")
 
+
+async def _solve_recaptcha_v3(site_key: str, page_url: str, action: str = "login") -> str:
+    """Résout reCAPTCHA v3 via 2captcha."""
+    if not TWOCAPTCHA_KEY:
+        return ""
     try:
-        # Soumettre le captcha
         async with httpx.AsyncClient(timeout=30) as client:
+            # Essayer v3 d'abord
             submit = await client.post(
                 "https://2captcha.com/in.php",
                 data={
                     "key": TWOCAPTCHA_KEY,
                     "method": "userrecaptcha",
+                    "version": "v3",
                     "googlekey": site_key,
                     "pageurl": page_url,
+                    "action": action,
+                    "min_score": "0.3",
                     "json": 1,
                 }
             )
             submit_data = submit.json()
-            logger.info(f"[2captcha] Submit: {submit_data}")
+            logger.info(f"[2captcha] Submit v3: {submit_data}")
 
             if submit_data.get("status") != 1:
-                logger.error(f"[2captcha] Erreur submit: {submit_data}")
-                return ""
+                # Fallback v2
+                submit = await client.post(
+                    "https://2captcha.com/in.php",
+                    data={
+                        "key": TWOCAPTCHA_KEY,
+                        "method": "userrecaptcha",
+                        "googlekey": site_key,
+                        "pageurl": page_url,
+                        "json": 1,
+                    }
+                )
+                submit_data = submit.json()
+                logger.info(f"[2captcha] Submit v2 fallback: {submit_data}")
+                if submit_data.get("status") != 1:
+                    return ""
 
             captcha_id = submit_data["request"]
 
-            # Attendre la résolution (max 2 minutes)
             for attempt in range(24):
                 await asyncio.sleep(5)
                 result = await client.get(
@@ -67,20 +84,14 @@ async def _solve_recaptcha(site_key: str, page_url: str) -> str:
                     params={"key": TWOCAPTCHA_KEY, "action": "get", "id": captcha_id, "json": 1}
                 )
                 result_data = result.json()
-                logger.info(f"[2captcha] Attempt {attempt+1}: {result_data.get('request', '')[:50]}")
-
                 if result_data.get("status") == 1:
-                    token = result_data["request"]
-                    logger.info(f"[2captcha] Token obtenu: {token[:30]}...")
-                    return token
-
+                    logger.info(f"[2captcha] Token: {result_data['request'][:30]}...")
+                    return result_data["request"]
                 if result_data.get("request") not in ["CAPCHA_NOT_READY", "CAPTCHA_NOT_READY"]:
                     logger.error(f"[2captcha] Erreur: {result_data}")
                     return ""
 
-        logger.error("[2captcha] Timeout")
         return ""
-
     except Exception as e:
         logger.error(f"[2captcha] Exception: {e}")
         return ""
@@ -262,12 +273,29 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             await page.goto(login_url, timeout=TIMEOUT, wait_until="networkidle")
             await page.wait_for_timeout(2000)
 
-            # Trouver la clé reCAPTCHA sur la page
+            # Chercher reCAPTCHA v2 ET v3 (v3 est invisible, dans le JS)
             site_key = await page.evaluate("""
                 document.querySelector('[data-sitekey]')?.dataset?.sitekey ||
-                document.querySelector('.g-recaptcha')?.dataset?.sitekey || ''
+                document.querySelector('.g-recaptcha')?.dataset?.sitekey ||
+                (function() {
+                    var scripts = Array.from(document.querySelectorAll('script'));
+                    for (var s of scripts) {
+                        var m = (s.src || '').match(/render=([^&]+)/);
+                        if (m) return m[1];
+                    }
+                    return '';
+                })() || ''
             """)
-            logger.info(f"[Booker Chrono] reCAPTCHA site_key: {site_key[:20] if site_key else 'non trouve'}")
+            logger.info(f"[Booker Chrono] reCAPTCHA site_key: '{site_key[:40] if site_key else 'non trouve'}'")
+
+            # Si pas trouvé via DOM, chercher dans le source HTML
+            if not site_key:
+                page_html = await page.content()
+                import re as _re2
+                m = _re2.search(r"'([0-9A-Za-z_-]{40})'", page_html)
+                if m:
+                    site_key = m.group(1)
+                    logger.info(f"[Booker Chrono] site_key depuis HTML: {site_key[:20]}")
 
             email_field = await page.query_selector("input[name='email'], input[id='sessionEmail']")
             pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword']")
@@ -283,23 +311,25 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             await pwd_field.type(password, delay=30)
             await page.wait_for_timeout(500)
 
-            # Résoudre reCAPTCHA si présent
-            if site_key and TWOCAPTCHA_KEY:
-                logger.info(f"[Booker Chrono] Résolution reCAPTCHA via 2captcha...")
-                captcha_token = await _solve_recaptcha(site_key, login_url)
+            # Résoudre reCAPTCHA v3 (invisible) via 2captcha
+            if TWOCAPTCHA_KEY:
+                # Utiliser le site_key trouvé ou celui connu de Chronogolf
+                captcha_site_key = site_key or "6LdSsN0UAAAAAMJmBPcmz9eRm4bpjYUBWNpgfBni"
+                logger.info(f"[Booker Chrono] Résolution reCAPTCHA v3 via 2captcha (key={captcha_site_key[:20]})")
+                captcha_token = await _solve_recaptcha_v3(captcha_site_key, login_url, "login")
                 if captcha_token:
-                    # Injecter le token dans la page
                     await page.evaluate(f"""
-                        document.getElementById('g-recaptcha-response') &&
-                        (document.getElementById('g-recaptcha-response').value = '{captcha_token}');
-                        window.grecaptcha && window.grecaptcha.getResponse && 
-                        (window.___grecaptcha_cfg = window.___grecaptcha_cfg || {{}});
+                        // Injecter pour v2
+                        var el = document.getElementById('g-recaptcha-response');
+                        if (el) el.value = '{captcha_token}';
+                        // Pour v3 Angular
+                        window.__recaptcha_token = '{captcha_token}';
                     """)
                     logger.info(f"[Booker Chrono] Token reCAPTCHA injecté")
                 else:
-                    logger.warning(f"[Booker Chrono] Pas de token reCAPTCHA — tentative sans")
+                    logger.warning(f"[Booker Chrono] Pas de token — tentative sans captcha")
             else:
-                logger.info(f"[Booker Chrono] Pas de reCAPTCHA détecté ou pas de clé 2captcha")
+                logger.info(f"[Booker Chrono] Pas de clé 2captcha configurée")
 
             # Soumettre le formulaire
             login_btn = await page.query_selector("button:has-text('Log in'), button[type='submit']")
