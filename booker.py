@@ -276,6 +276,7 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
         }
 
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=login_headers) as client:
+            # Note: follow_redirects=True pour GET, mais on override pour le POST
             # Login
             login_resp = await client.post(
                 "https://www.chronogolf.ca/marketplace/sessions",
@@ -354,14 +355,25 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 }
             }
 
-            res_resp = await client.post("https://www.chronogolf.ca/marketplace/reservations", json=payload)
+            # Ne pas suivre les redirects — un 302 vers /login = session invalide
+            res_resp = await client.post(
+                "https://www.chronogolf.ca/marketplace/reservations",
+                json=payload,
+                follow_redirects=False,
+            )
             logger.info(f"[Booker Chrono] Reservation: {res_resp.status_code} — {res_resp.text[:200]}")
 
             if res_resp.status_code in [200, 201]:
                 return {"succes": True, "message": "Reservation Chronogolf confirmee! Verifiez votre courriel."}
 
-            # Si 401, logger tous les cookies et headers pour debug
-            logger.warning(f"[Booker Chrono] 401 — Cookies: {dict(client.cookies)}")
+            if res_resp.status_code == 302:
+                redirect = res_resp.headers.get("location", "")
+                logger.warning(f"[Booker Chrono] 302 redirect vers: {redirect}")
+                # Session non valide pour le POST — essayer avec les cookies du login enrichis
+                logger.warning(f"[Booker Chrono] Cookies: {dict(client.cookies)}")
+                return {"succes": False, "message": "Session Chronogolf insuffisante pour la reservation.", "url_fallback": url_base}
+
+            logger.warning(f"[Booker Chrono] Erreur {res_resp.status_code}: {res_resp.text[:200]}")
             return {"succes": False, "message": f"Erreur Chronogolf ({res_resp.status_code}).", "url_fallback": url_base}
 
     except Exception as e:
