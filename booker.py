@@ -299,6 +299,19 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             # Cookies de session établis automatiquement par httpx
             logger.info(f"[Booker Chrono] Cookies: {list(client.cookies.keys())[:5]}")
 
+            # Extraire le CSRF token depuis les headers de la reponse login
+            csrf_token = login_resp.headers.get("X-Csrf-Token", "")
+            if not csrf_token:
+                # Essayer depuis les cookies
+                csrf_token = client.cookies.get("X-CSRF-Token", "")
+            if not csrf_token:
+                # GET une page pour obtenir le CSRF token
+                csrf_resp = await client.get("https://www.chronogolf.ca/marketplace/v2/session")
+                csrf_token = csrf_resp.headers.get("X-Csrf-Token", "")
+            logger.info(f"[Booker Chrono] CSRF token: {'oui' if csrf_token else 'non'} — {csrf_token[:20] if csrf_token else ''}")
+            if csrf_token:
+                client.headers["X-Csrf-Token"] = csrf_token
+
             # ── Étape 2 : GET teetimes pour trouver teetime_id ──
             teetimes_url_api = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
 
