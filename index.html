@@ -1205,7 +1205,7 @@ async function confirmerAlerte() {
     });
     if (res.ok) {
       fermerModal();
-      afficherToast(`Alerte activee! Notification a ${emailFinal}`);
+      afficherToast('Alerte activee! Notification a ' + emailFinal);
     } else {
       const err = await res.json();
       afficherToast(err.detail || "Erreur creation alerte", true);
@@ -1215,6 +1215,61 @@ async function confirmerAlerte() {
   }
 }
 
+// ── Credentials (localStorage) ───────────────────────
+const CREDS_KEY = 'golf_alert_creds';
+
+function getCredentials() {
+  try {
+    const raw = localStorage.getItem(CREDS_KEY);
+    return raw ? JSON.parse(raw) : { ggg: null, chrono: null };
+  } catch(e) {
+    return { ggg: null, chrono: null };
+  }
+}
+
+function sauvegarderCredentials(systeme) {
+  const userEl = document.getElementById(`profil-${systeme}-user`);
+  const pwdEl  = document.getElementById(`profil-${systeme}-pwd`);
+  const user   = userEl.value.trim();
+  const pwd    = pwdEl.value.trim();
+
+  if (!user || !pwd) {
+    afficherToast('Veuillez entrer identifiant et mot de passe', true);
+    return;
+  }
+
+  const creds = getCredentials();
+  creds[systeme] = { username: user, password: pwd };
+  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+
+  // Masquer le mot de passe après sauvegarde
+  pwdEl.value = '••••••••';
+  afficherToast(`✅ Identifiants ${systeme === 'ggg' ? 'GGG Golf' : 'Chronogolf'} sauvegardés`);
+  mettreAJourStatusProfil();
+}
+
+function effacerCredentials(systeme) {
+  const creds = getCredentials();
+  creds[systeme] = null;
+  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+  if (systeme === 'ggg') {
+    document.getElementById('profil-ggg-user').value = '';
+    document.getElementById('profil-ggg-pwd').value = '';
+  }
+  afficherToast(`Identifiants GGG Golf effacés`);
+  mettreAJourStatusProfil();
+}
+
+// ── Session Chronogolf ────────────────────────────
+let chronoWindow = null;
+
+function etapeOuvrirChrono() {
+  // Ouvrir Chronogolf dans un nouvel onglet
+  chronoWindow = window.open('https://www.chronogolf.ca/fr', '_blank');
+  // Afficher l'étape 2
+  document.getElementById('chrono-step2').style.display = 'block';
+  afficherToast('Connectez-vous sur Chronogolf, puis revenez ici');
+}
 
 async function capturerSessionChrono() {
   // Appeler notre backend pour récupérer la session capturée
