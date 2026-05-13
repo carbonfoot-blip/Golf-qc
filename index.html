@@ -906,17 +906,25 @@
         <span id="chrono-status" style="font-size:.75rem"></span>
       </div>
       <div id="chrono-session-info" style="font-size:.8rem;padding:.625rem .75rem;border-radius:8px;margin-bottom:.75rem;background:var(--sand)">
-        <span id="chrono-session-text">○ Non connecté — cliquez pour connecter</span>
+        <span id="chrono-session-text">○ Non connecté</span>
       </div>
-      <div style="display:flex;gap:.5rem">
-        <button class="btn-confirm" style="flex:1;padding:.5rem .875rem;font-size:.8rem" onclick="ouvrirChronoAuth()">
-          🔗 Connecter Chronogolf
+
+      <!-- Étape 1 : ouvrir Chronogolf -->
+      <button class="btn-confirm" style="width:100%;padding:.5rem .875rem;font-size:.8rem;margin-bottom:.5rem" onclick="etapeOuvrirChrono()">
+        1️⃣ Se connecter sur Chronogolf
+      </button>
+
+      <!-- Étape 2 : bookmarklet ou bouton capture -->
+      <div id="chrono-step2" style="display:none">
+        <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:.5rem;padding:.5rem .75rem;background:#fff8e1;border-radius:6px;border:1px solid #fbbf24">
+          ✅ Connectez-vous sur Chronogolf, puis cliquez ci-dessous :
+        </div>
+        <button class="btn-confirm" style="width:100%;padding:.5rem .875rem;font-size:.8rem;background:var(--green-700)" onclick="capturerSessionChrono()">
+          2️⃣ Capturer ma session Chronogolf
         </button>
-        <button class="btn-cancel" style="padding:.5rem .875rem;font-size:.8rem" onclick="effacerSessionChrono()">🗑</button>
       </div>
-      <div style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem">
-        Ouvre Chronogolf dans un nouvel onglet. Connectez-vous, puis revenez et cliquez "J'ai terminé".
-      </div>
+
+      <button class="btn-cancel" style="width:100%;padding:.4rem;font-size:.75rem;margin-top:.375rem" onclick="effacerSessionChrono()">🗑 Effacer la session</button>
     </div>
 
     <div style="text-align:right">
@@ -1252,26 +1260,41 @@ function effacerCredentials(systeme) {
 }
 
 // ── Session Chronogolf ────────────────────────────
-function ouvrirChronoAuth() {
-  const authWin = window.open('/chrono-auth', 'chrono_auth', 'width=520,height=500,left=200,top=100');
+let chronoWindow = null;
 
-  // Écouter le message de retour
-  window.addEventListener('message', function onMessage(e) {
-    if (e.data && e.data.type === 'CHRONO_SESSION') {
-      window.removeEventListener('message', onMessage);
+function etapeOuvrirChrono() {
+  // Ouvrir Chronogolf dans un nouvel onglet
+  chronoWindow = window.open('https://www.chronogolf.ca/fr', '_blank');
+  // Afficher l'étape 2
+  document.getElementById('chrono-step2').style.display = 'block';
+  afficherToast('Connectez-vous sur Chronogolf, puis revenez ici');
+}
+
+async function capturerSessionChrono() {
+  // Appeler notre backend pour récupérer la session capturée
+  try {
+    const resp = await fetch(`${API}/chrono-session-get`);
+    const data = await resp.json();
+
+    if (data.valide && data.session) {
       const creds = getCredentials();
       creds.chronoSession = {
-        session: e.data.session,
-        cf_clearance: e.data.cf_clearance,
-        email: e.data.email,
-        expire_at: e.data.expire_at,
+        session: data.session,
+        cf_clearance: data.cf_clearance || '',
+        email: data.email || '',
+        expire_at: Date.now() + 23 * 3600 * 1000,
       };
       localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
-      afficherToast(`✅ Chronogolf connecté — ${e.data.email}`);
+      document.getElementById('chrono-step2').style.display = 'none';
+      afficherToast('✅ Chronogolf connecté!');
       mettreAJourStatusProfil();
-      if (authWin && !authWin.closed) authWin.close();
+      if (chronoWindow && !chronoWindow.closed) chronoWindow.close();
+    } else {
+      afficherToast('❌ Session non trouvée — connectez-vous d'abord sur Chronogolf', true);
     }
-  });
+  } catch(e) {
+    afficherToast('❌ Erreur de connexion', true);
+  }
 }
 
 function effacerSessionChrono() {

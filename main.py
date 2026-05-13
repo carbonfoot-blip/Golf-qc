@@ -1,15 +1,5 @@
 """
 main.py — Application FastAPI pour golf-alert.
-
-Routes :
-  GET  /api/courses          — Liste des terrains (avec filtre région)
-  GET  /api/courses/{id}     — Détail d'un terrain
-  POST /api/alerts           — Créer une alerte SMS
-  GET  /api/alerts           — Lister toutes les alertes
-  DELETE /api/alerts/{id}    — Supprimer une alerte
-  GET  /api/alerts/{id}/logs — Logs de polling d'une alerte
-  POST /api/check/{alert_id} — Forcer un check immédiat
-  GET  /api/search           — Recherche de disponibilités (sans alerte)
 """
 
 import json
@@ -22,13 +12,12 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 
-# Charger .env
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 from database import (
@@ -57,8 +46,10 @@ def load_courses() -> list[dict]:
 COURSES = load_courses()
 COURSES_BY_ID = {c["id"]: c for c in COURSES}
 
+# ─── Stockage session Chronogolf ───────────────────────
+_chrono_sessions: dict = {}
 
-# ─── Lifespan (startup / shutdown) ────────────────────
+# ─── Lifespan ──────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🏌️ Démarrage de golf-alert")
@@ -68,8 +59,7 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
     logger.info("Golf-alert arrêté")
 
-
-# ─── App ──────────────────────────────────────────────
+# ─── App ───────────────────────────────────────────────
 app = FastAPI(
     title="Golf Alert API",
     description="Réservation et alertes de départs de golf au Québec",
@@ -84,16 +74,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ─── Modèles Pydantic ─────────────────────────────────
+# ─── Modèles Pydantic ──────────────────────────────────
 class AlerteCreate(BaseModel):
     terrain_id: str
-    date: str            # YYYY-MM-DD
-    heure_debut: str     # HH:MM
-    heure_fin: str       # HH:MM
-    nb_joueurs: int      # 1–4
-    email: str           # email de notification
-    intervalle: int = 15 # minutes
+    date: str
+    heure_debut: str
+    heure_fin: str
+    nb_joueurs: int
+    email: str
+    intervalle: int = 15
 
     @field_validator("nb_joueurs")
     @classmethod
@@ -116,6 +105,7 @@ class AlerteCreate(BaseModel):
             raise ValueError(f"Terrain '{v}' introuvable")
         return v
 
+
 class ReservationRequest(BaseModel):
     terrain_id: str
     confirm_url: str
@@ -126,24 +116,20 @@ class ReservationRequest(BaseModel):
     nb_joueurs: int
 
 
-# ─── Routes : Terrains ────────────────────────────────
+# ─── Routes : Terrains ─────────────────────────────────
 @app.get("/api/courses")
 async def get_courses(
     region: Optional[str] = None,
     systeme: Optional[str] = None,
     apex: Optional[bool] = None,
 ):
-    """Liste des terrains avec filtres optionnels."""
     results = COURSES
-
     if region:
         results = [c for c in results if c["region"].lower() == region.lower()]
     if systeme:
         results = [c for c in results if c["systeme"] == systeme]
     if apex is not None:
         results = [c for c in results if c["apex"] == apex]
-
-    # Enrichir avec le statut de la fenêtre de réservation
     today = date.today()
     enriched = []
     for course in results:
@@ -151,90 +137,71 @@ async def get_courses(
         fenetre = course["fenetreReservation"]
         c["date_ouverture_max"] = (today + timedelta(days=fenetre)).isoformat()
         enriched.append(c)
-
     return enriched
 
 
 @app.get("/api/courses/regions")
 async def get_regions():
-    """Liste des régions disponibles."""
     regions = sorted(set(c["region"] for c in COURSES))
     return regions
 
 
 @app.get("/api/courses/{course_id}")
 async def get_course(course_id: str):
-    """Détail d'un terrain."""
     if course_id not in COURSES_BY_ID:
         raise HTTPException(status_code=404, detail="Terrain introuvable")
     return COURSES_BY_ID[course_id]
 
 
-# ─── Routes : Recherche ───────────────────────────────
+# ─── Routes : Recherche ────────────────────────────────
 @app.get("/api/search")
 async def search_tee_times(
-    terrain_id: str = Query(..., description="ID du terrain"),
-    date: str = Query(..., description="Date YYYY-MM-DD"),
-    heure_debut: str = Query(..., description="Heure début HH:MM"),
-    heure_fin: str = Query(..., description="Heure fin HH:MM"),
+    terrain_id: str = Query(...),
+    date: str = Query(...),
+    heure_debut: str = Query(...),
+    heure_fin: str = Query(...),
     nb_joueurs: int = Query(default=2, ge=1, le=4),
 ):
-    """Recherche immédiate de départs disponibles (sans créer d'alerte)."""
     if terrain_id not in COURSES_BY_ID:
         raise HTTPException(status_code=404, detail="Terrain introuvable")
-
     terrain = COURSES_BY_ID[terrain_id]
-
-    # Vérifier la fenêtre de réservation
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Format de date invalide (YYYY-MM-DD)")
-
+        raise HTTPException(status_code=400, detail="Format de date invalide")
     today_date = datetime.today().date()
     jours_avant = (target_date - today_date).days
-
     if jours_avant < 0:
         raise HTTPException(status_code=400, detail="La date est dans le passé")
-
     fenetre = terrain["fenetreReservation"]
     if jours_avant > fenetre:
         return {
             "terrain": terrain,
             "disponible": False,
             "jours_avant_ouverture": jours_avant - fenetre,
-            "date_ouverture": (today_date + timedelta(days=fenetre - jours_avant + jours_avant)).isoformat(),
             "tee_times": [],
-            "message": (
-                f"La réservation pour {terrain['nom']} ouvre dans "
-                f"{jours_avant - fenetre} jour(s)"
-            ),
+            "message": f"La réservation ouvre dans {jours_avant - fenetre} jour(s)",
         }
-
     tee_times = await get_available_tee_times(
-        terrain=terrain,
-        date=date,
-        heure_debut=heure_debut,
-        heure_fin=heure_fin,
-        nb_joueurs=nb_joueurs,
+        terrain=terrain, date=date,
+        heure_debut=heure_debut, heure_fin=heure_fin, nb_joueurs=nb_joueurs,
     )
-
     return {
         "terrain": terrain,
         "disponible": len(tee_times) > 0,
         "jours_avant_ouverture": 0,
         "tee_times": tee_times,
-        "message": (
-            f"{len(tee_times)} départ(s) disponible(s)" if tee_times
-            else "Aucun départ disponible dans cette plage"
-        ),
+        "message": f"{len(tee_times)} départ(s) disponible(s)" if tee_times else "Aucun départ dans cette plage",
     }
 
+
+# ─── Routes : Réservation directe ──────────────────────
 @app.post("/api/reserver")
 async def reserver(req: ReservationRequest):
     if req.terrain_id not in COURSES_BY_ID:
         raise HTTPException(status_code=404, detail="Terrain introuvable")
     terrain = COURSES_BY_ID[req.terrain_id]
+    logger.info(f"[Réservation] {terrain['nom']} — {req.date} {req.heure} — {req.nb_joueurs}j")
     result = await reserver_depart(
         terrain=terrain,
         confirm_url=req.confirm_url,
@@ -246,21 +213,72 @@ async def reserver(req: ReservationRequest):
     )
     return result
 
-# ─── Routes : Alertes ─────────────────────────────────
+
+# ─── Routes : Session Chronogolf ───────────────────────
+@app.post("/api/chrono-capture")
+async def chrono_capture(request: Request):
+    """Reçoit la session Chronogolf depuis le bookmarklet."""
+    try:
+        data = await request.json()
+        session = data.get("session", "")
+        cf_clearance = data.get("cf_clearance", "")
+        if not session:
+            return {"ok": False, "message": "Session vide"}
+
+        import httpx as _httpx
+        email = ""
+        try:
+            async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+                resp = await client.get(
+                    "https://www.chronogolf.ca/marketplace/sessions",
+                    cookies={"_chronogolf_session": session, "cf_clearance": cf_clearance},
+                    headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
+                )
+                if resp.status_code == 200:
+                    email = resp.json().get("email", "")
+                    logger.info(f"[ChronoCapture] Session valide: {email}")
+        except Exception as e:
+            logger.warning(f"[ChronoCapture] Verification: {e}")
+
+        client_ip = request.client.host
+        _chrono_sessions[client_ip] = {
+            "session": session,
+            "cf_clearance": cf_clearance,
+            "email": email,
+            "valide": True,
+        }
+        logger.info(f"[ChronoCapture] Capturée pour {client_ip}: {email}")
+        return {"ok": True, "email": email}
+    except Exception as e:
+        logger.error(f"[ChronoCapture] Erreur: {e}")
+        return {"ok": False, "message": str(e)}
+
+
+@app.get("/api/chrono-session-get")
+async def chrono_session_get(request: Request):
+    """Retourne la session Chronogolf capturée."""
+    client_ip = request.client.host
+    session_data = _chrono_sessions.get(client_ip)
+    if not session_data:
+        return {"valide": False, "message": "Aucune session capturée"}
+    return {
+        "valide": True,
+        "session": session_data["session"],
+        "cf_clearance": session_data["cf_clearance"],
+        "email": session_data["email"],
+    }
+
+
+# ─── Routes : Alertes ──────────────────────────────────
 @app.post("/api/alerts", status_code=201)
 async def creer_alerte(alerte: AlerteCreate):
-    """Crée une nouvelle alerte SMS."""
     terrain = COURSES_BY_ID[alerte.terrain_id]
-
-    # Vérifier que la date n'est pas passée
     try:
         target_date = datetime.strptime(alerte.date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Format de date invalide")
-
     if target_date < date.today():
         raise HTTPException(status_code=400, detail="La date est dans le passé")
-
     alert_id = await create_alert(
         terrain_id=alerte.terrain_id,
         terrain_nom=terrain["nom"],
@@ -268,98 +286,61 @@ async def creer_alerte(alerte: AlerteCreate):
         heure_debut=alerte.heure_debut,
         heure_fin=alerte.heure_fin,
         nb_joueurs=alerte.nb_joueurs,
-        telephone=alerte.telephone,
+        email=alerte.email,
         intervalle=alerte.intervalle,
     )
-
-    logger.info(
-        f"📲 Alerte #{alert_id} créée — {terrain['nom']} le {alerte.date} "
-        f"({alerte.heure_debut}–{alerte.heure_fin}), {alerte.nb_joueurs}j, "
-        f"tél: {alerte.telephone}, intervalle: {alerte.intervalle}min"
-    )
-
+    logger.info(f"📧 Alerte #{alert_id} — {terrain['nom']} le {alerte.date} — {alerte.email}")
     return {
         "id": alert_id,
-        "message": (
-            f"Alerte créée. Vous serez notifié au {alerte.telephone} "
-            f"dès qu'un départ se libère au {terrain['nom']} "
-            f"le {alerte.date} entre {alerte.heure_debut} et {alerte.heure_fin}."
-        ),
+        "message": f"Alerte créée. Vous serez notifié à {alerte.email} dès qu'un départ se libère au {terrain['nom']}.",
         "terrain": terrain,
     }
 
 
 @app.get("/api/alerts")
 async def lister_alertes():
-    """Liste toutes les alertes."""
     return await get_all_alerts()
 
 
 @app.delete("/api/alerts/{alert_id}")
 async def supprimer_alerte(alert_id: int):
-    """Désactive une alerte."""
     await delete_alert(alert_id)
     return {"message": f"Alerte #{alert_id} supprimée"}
 
 
 @app.get("/api/alerts/{alert_id}/logs")
 async def logs_alerte(alert_id: int, limit: int = 20):
-    """Logs de polling d'une alerte."""
     return await get_poll_logs(alert_id, limit)
 
 
 @app.post("/api/check/{alert_id}")
 async def forcer_check(alert_id: int):
-    """Force un check immédiat pour une alerte (utile pour debug)."""
     from database import get_active_alerts
     from scheduler import _check_single_alert
-
     alerts = await get_active_alerts()
     alert = next((a for a in alerts if a["id"] == alert_id), None)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte introuvable ou déjà notifiée")
-
     terrain = COURSES_BY_ID.get(alert["terrain_id"])
     if not terrain:
         raise HTTPException(status_code=404, detail="Terrain introuvable")
-
     await _check_single_alert(alert, terrain)
     return {"message": f"Check forcé pour alerte #{alert_id}"}
 
 
-@app.get("/chrono-auth")
-async def serve_chrono_auth():
-    f = FRONTEND_DIR / "chrono-auth.html"
-    if f.exists():
-        return FileResponse(str(f))
-    raise HTTPException(status_code=404, detail="chrono-auth.html introuvable")
-
-@app.post("/api/chrono-session")
-async def get_chrono_session(request: Request):
-    cookies = request.cookies
-    session = cookies.get("_chronogolf_session", "")
-    cf_clearance = cookies.get("cf_clearance", "")
-    if not session:
-        return {"valide": False}
-    return {
-        "valide": True,
-        "email": "",
-        "session": session,
-        "cf_clearance": cf_clearance,
-        "duree_heures": 23,
-    }
-
-
-# ─── Servir le frontend ───────────────────────────────
+# ─── Servir le frontend ────────────────────────────────
 BASE = Path(__file__).parent
 FRONTEND_DIR = BASE / "frontend" if (BASE / "frontend").exists() else BASE
+
+if FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 @app.get("/")
 async def serve_index():
     f = FRONTEND_DIR / "index.html"
     if f.exists():
         return FileResponse(str(f))
-    return {"message": "index.html introuvable"}
+    return {"message": "Golf Alert API"}
 
 @app.get("/alerts")
 async def serve_alerts():
@@ -368,7 +349,15 @@ async def serve_alerts():
         return FileResponse(str(f))
     raise HTTPException(status_code=404, detail="alerts.html introuvable")
 
-# ─── Démarrage direct ─────────────────────────────────
+@app.get("/chrono-auth")
+async def serve_chrono_auth():
+    f = FRONTEND_DIR / "chrono-auth.html"
+    if f.exists():
+        return FileResponse(str(f))
+    raise HTTPException(status_code=404, detail="chrono-auth.html introuvable")
+
+
+# ─── Démarrage direct ──────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     host = os.getenv("API_HOST", "127.0.0.1")
