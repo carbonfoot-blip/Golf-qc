@@ -303,19 +303,22 @@ async def forcer_check(alert_id: int):
 
 
 # ─── Servir le frontend ───────────────────────────────
-FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+BASE = Path(__file__).parent
+FRONTEND_DIR = BASE / "frontend" if (BASE / "frontend").exists() else BASE
 
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+@app.get("/")
+async def serve_index():
+    f = FRONTEND_DIR / "index.html"
+    if f.exists():
+        return FileResponse(str(f))
+    return {"message": "index.html introuvable"}
 
-    @app.get("/")
-    async def serve_index():
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
-
-    @app.get("/alerts")
-    async def serve_alerts():
-        return FileResponse(str(FRONTEND_DIR / "alerts.html"))
-
+@app.get("/alerts")
+async def serve_alerts():
+    f = FRONTEND_DIR / "alerts.html"
+    if f.exists():
+        return FileResponse(str(f))
+    raise HTTPException(status_code=404, detail="alerts.html introuvable")
 
 # ─── Démarrage direct ─────────────────────────────────
 if __name__ == "__main__":
