@@ -1,15 +1,20 @@
 """
 booker.py — Réservation GGG Golf.
-Flow simplifié : login + recherche + clic départ + confirmation
-Tout dans la même session Playwright. On ignore les Keys de l'utilisateur.
+Flow hybride Playwright + httpx :
+  1. Playwright : login → cookies de session
+  2. httpx avec cookies : POST recherche → HTML avec Keys fraîches
+  3. Parser les Keys du départ voulu
+  4. Playwright avec cookies : GET req=confirm → confirmer
 """
 
 import logging
 import re
+import httpx
 from playwright.async_api import async_playwright, TimeoutError as PwTimeout
 
 logger = logging.getLogger(__name__)
 TIMEOUT = 30_000
+HTTP_TIMEOUT = 20
 
 
 async def reserver_depart(
@@ -29,11 +34,12 @@ async def _reserver_gggolf(
     date: str, heure: str, nb_joueurs: int
 ) -> dict:
     slug = terrain.get("ggg_slug", terrain["id"])
-    login_url    = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=user&lang=fr"
-    teetimes_url = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
+    base    = f"https://secure.gggolf.ca/{slug}"
+    login_url    = f"{base}/index.php?option=com_ggpublic&req=user&lang=fr"
+    teetimes_url = f"{base}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
 
-    heure_h      = str(int(heure.split(":")[0])) if heure else "7"
-    heure_h_pad  = heure_h.zfill(2)
+    heure_h     = str(int(heure.split(":")[0])) if heure else "7"
+    heure_h_pad = heure_h.zfill(2)
 
     logger.info(f"[Booker GGG] Debut: {terrain['nom']} — {date} {heure} {nb_joueurs}j")
 
@@ -46,7 +52,7 @@ async def _reserver_gggolf(
             )
             page = await context.new_page()
 
-            # ── Étape 1 : Login ──────────────────────────────
+            # ── Étape 1 : Login via Playwright ───────────────
             await page.goto(login_url, timeout=TIMEOUT, wait_until="domcontentloaded")
 
             email_field = await page.query_selector("input[name='email'], input[id='email']")
@@ -75,92 +81,56 @@ async def _reserver_gggolf(
             for fail in ["identifiant incorrect", "mot de passe incorrect", "invalid"]:
                 if fail in content.lower():
                     await browser.close()
-                    return {"succes": False, "message": "Identifiants incorrects. Vérifiez votre courriel et mot de passe GGG Golf."}
+                    return {"succes": False, "message": "Identifiants incorrects."}
 
-            # ── Étape 2 : Faire la recherche dans la session connectée ──
-            logger.info(f"[Booker GGG] Recherche: {teetimes_url} date={date} heure={heure_h} joueurs={nb_joueurs}")
-            await page.goto(teetimes_url, timeout=TIMEOUT, wait_until="domcontentloaded")
+            # ── Étape 2 : Extraire les cookies Playwright ────
+            pw_cookies = await context.cookies()
+            cookie_dict = {c["name"]: c["value"] for c in pw_cookies}
+            logger.info(f"[Booker GGG] Cookies session: {list(cookie_dict.keys())}")
 
-            # Remplir la date
-            if date:
-                date_input = await page.query_selector(
-                    "input.jquery_ui_datepicker, input[name='date'], input[id='date']"
-                )
-                if date_input:
-                    await date_input.fill(date)
-                    await date_input.dispatch_event("change")
-                    await page.wait_for_timeout(500)
+            # ── Étape 3 : POST recherche via httpx avec cookies ──
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": teetimes_url,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "fr-CA,fr;q=0.9",
+                "Origin": f"https://secure.gggolf.ca",
+            }
 
-            # Remplir l'heure
-            hour_sel = await page.query_selector("select[name='hour'], select[name='heure'], select[id='hour']")
-            if hour_sel:
-                for h_val in [heure_h, heure_h_pad]:
-                    try:
-                        await hour_sel.select_option(value=h_val)
-                        logger.info(f"[Booker GGG] Heure selectionnee: {h_val}")
+            payloads = [
+                {"date": date, "hour": heure_h,     "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+                {"date": date, "hour": heure_h_pad, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+            ]
+
+            search_html = ""
+            async with httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT,
+                follow_redirects=True,
+                cookies=cookie_dict,
+                headers=headers,
+            ) as client:
+                for payload in payloads:
+                    resp = await client.post(teetimes_url, data=payload)
+                    logger.info(f"[Booker GGG] httpx POST {resp.status_code}: {len(resp.text)} chars (hour={payload['hour']})")
+                    if resp.status_code == 200 and len(resp.text) > 18000:
+                        search_html = resp.text
+                        logger.info(f"[Booker GGG] HTML riche obtenu via httpx")
                         break
-                    except Exception:
-                        continue
 
-            # Remplir les minutes
-            min_sel = await page.query_selector("select[name='minute'], select[id='minute']")
-            if min_sel:
-                try:
-                    await min_sel.select_option(value="00")
-                except Exception:
-                    pass
+            if not search_html:
+                # Fallback: essayer sans cookies (moins de chars mais peut avoir les Keys)
+                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers) as client:
+                    await client.get(teetimes_url)
+                    resp = await client.post(teetimes_url, data=payloads[0])
+                    search_html = resp.text
+                    logger.info(f"[Booker GGG] Fallback sans cookies: {len(search_html)} chars")
 
-            # Remplir joueurs
-            players_sel = await page.query_selector(
-                "select[name*='player'], select[name*='joueur'], select[name='nbplayers'], select[id*='player']"
-            )
-            if players_sel:
-                try:
-                    await players_sel.select_option(value=str(nb_joueurs))
-                except Exception:
-                    pass
+            # ── Étape 4 : Parser les Keys du départ voulu ───
+            confirm_url_fresh = _trouver_confirm_url(search_html, heure, slug)
 
-            # Soumettre la recherche
-            submit_btn = await page.query_selector(
-                "input[name='sSearch'], input[type='submit'][value*='Chercher'], input[type='submit']"
-            )
-            if submit_btn:
-                await submit_btn.click()
-                # Attendre que le tableau de résultats apparaisse
-                try:
-                    await page.wait_for_selector(
-                        "#agTable, table.autogrid, tr.autogridEven, tr.autogridOdd, "
-                        ".teetimes_results-lineblock, [class*='teetimes_results']",
-                        timeout=20000
-                    )
-                    logger.info(f"[Booker GGG] Tableau resultats apparu")
-                except PwTimeout:
-                    # Essayer soumission via JS
-                    logger.warning(f"[Booker GGG] Tableau non apparu — submit JS")
-                    js_submit = (
-                        "var f = document.getElementById('ag') || "
-                        "document.querySelector('form.form-inline') || "
-                        "document.querySelector('form'); "
-                        "if(f) f.submit();"
-                    )
-                    await page.evaluate(js_submit)
-                    try:
-                        await page.wait_for_selector(
-                            "#agTable, tr.autogridEven, tr.autogridOdd",
-                            timeout=10000
-                        )
-                        logger.info(f"[Booker GGG] Tableau apparu apres submit JS")
-                    except PwTimeout:
-                        logger.warning(f"[Booker GGG] Tableau toujours absent — attente 5s")
-                        await page.wait_for_timeout(5000)
-
-            search_content = await page.content()
-            logger.info(f"[Booker GGG] Resultats recherche: {len(search_content)} chars — URL: {page.url}")
-
-            # ── Étape 3 : Trouver et cliquer sur le départ voulu ──
-            found = await _trouver_et_cliquer_depart(page, heure, terrain)
-
-            if not found:
+            if not confirm_url_fresh:
+                logger.warning(f"[Booker GGG] Heure {heure} non trouvee dans HTML httpx")
                 await browser.close()
                 return {
                     "succes": False,
@@ -168,13 +138,18 @@ async def _reserver_gggolf(
                     "url_fallback": teetimes_url,
                 }
 
-            # ── Étape 4 : Page de confirmation — cliquer "J'accepte les termes" ──
-            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            logger.info(f"[Booker GGG] confirm_url frais: {confirm_url_fresh}")
+
+            # ── Étape 5 : Naviguer vers confirm avec Playwright (session connectée) ──
+            await page.goto(confirm_url_fresh, timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(1000)
+            logger.info(f"[Booker GGG] URL apres goto confirm: {page.url}")
+
             confirm_content = await page.content()
-            logger.info(f"[Booker GGG] Page confirm: {len(confirm_content)} chars — URL: {page.url}")
+            logger.info(f"[Booker GGG] Page confirm: {len(confirm_content)} chars")
 
             if "accepte" not in confirm_content.lower():
-                logger.warning(f"[Booker GGG] Pas sur page confirm. HTML[0:300]: {confirm_content[:300]}")
+                logger.warning(f"[Booker GGG] Pas sur page confirm. URL: {page.url}")
                 await browser.close()
                 return {
                     "succes": False,
@@ -182,7 +157,7 @@ async def _reserver_gggolf(
                     "url_fallback": teetimes_url,
                 }
 
-            # Trouver et cliquer le bouton de confirmation
+            # ── Étape 6 : Cliquer "J'accepte les termes" ────
             confirm_btn = await page.query_selector("input[name='nook']")
             if not confirm_btn:
                 all_submits = await page.query_selector_all("input[type='submit']")
@@ -197,7 +172,7 @@ async def _reserver_gggolf(
                 return {"succes": False, "message": "Bouton de confirmation introuvable.", "url_fallback": teetimes_url}
 
             btn_val = await confirm_btn.get_attribute("value") or ""
-            logger.info(f"[Booker GGG] Clic confirmation: '{btn_val[:60]}'")
+            logger.info(f"[Booker GGG] Clic: '{btn_val[:60]}'")
 
             try:
                 async with page.expect_navigation(timeout=20000):
@@ -206,9 +181,9 @@ async def _reserver_gggolf(
                 await page.wait_for_timeout(3000)
 
             final_content = await page.content()
-            logger.info(f"[Booker GGG] Page finale: {len(final_content)} chars — URL: {page.url}")
+            logger.info(f"[Booker GGG] Finale: {page.url} — {len(final_content)} chars")
 
-            # ── Étape 5 : Vérifier le succès ──
+            # ── Étape 7 : Vérifier le succès ────────────────
             for indicator in ["numero de reservation", "numéro de réservation", "confirmée", "merci", "thank you"]:
                 if indicator.lower() in final_content.lower():
                     logger.info(f"[Booker GGG] SUCCES — '{indicator}'")
@@ -220,7 +195,7 @@ async def _reserver_gggolf(
                     await browser.close()
                     return {"succes": False, "message": "Erreur — le départ est peut-être déjà pris.", "url_fallback": teetimes_url}
 
-            logger.warning(f"[Booker GGG] Aucun indicateur. HTML[0:500]: {final_content[:500]}")
+            logger.warning(f"[Booker GGG] Aucun indicateur. HTML[0:400]: {final_content[:400]}")
             await browser.close()
             return {"succes": True, "message": "Réservation soumise. Vérifiez votre courriel."}
 
@@ -229,14 +204,10 @@ async def _reserver_gggolf(
         return {"succes": False, "message": "Erreur technique. Essayez directement sur GGG Golf.", "url_fallback": teetimes_url}
 
 
-async def _trouver_et_cliquer_depart(page, heure_cible: str, terrain: dict) -> bool:
-    """Trouve le départ à l'heure cible et clique son lien de confirmation."""
-    if not heure_cible:
-        return False
+def _trouver_confirm_url(html: str, heure_cible: str, slug: str) -> str:
+    """Trouve l'URL de confirmation pour l'heure cible dans le HTML de recherche."""
 
-    html = await page.content()
-    slug = terrain.get("ggg_slug", terrain["id"])
-    logger.info(f"[Booker GGG] Recherche heure {heure_cible} dans {len(html)} chars")
+    heure_norm = f"{int(heure_cible.split(':')[0]):02d}:{heure_cible.split(':')[1]}"
 
     # Format 1 : teetimes_results-hour (Beloeil)
     bloc_pattern = re.compile(
@@ -244,47 +215,38 @@ async def _trouver_et_cliquer_depart(page, heure_cible: str, terrain: dict) -> b
         re.DOTALL | re.IGNORECASE
     )
     for m in bloc_pattern.finditer(html):
-        if m.group(2).strip() == heure_cible:
-            confirm_url = m.group(1).replace("&amp;", "&")
-            logger.info(f"[Booker GGG] Format 1 trouve: {confirm_url}")
-            await page.goto(confirm_url, timeout=TIMEOUT, wait_until="domcontentloaded")
-            return True
+        h = f"{int(m.group(2).split(':')[0]):02d}:{m.group(2).split(':')[1]}"
+        if h == heure_norm:
+            return m.group(1).replace("&amp;", "&")
 
-    # Format 2 : autogrid (Madeleine, Cerf, Vallée-des-Forts)
+    # Format 2 : autogrid (Madeleine, Cerf...)
     row_pattern = re.compile(
         r'<tr[^>]*class="[^"]*autogrid(?:Even|Odd)[^"]*"[^>]*>(.*?)</tr>',
         re.DOTALL | re.IGNORECASE
     )
     for row_m in row_pattern.finditer(html):
         row_html = row_m.group(1)
-        heure_match = re.search(
-            r'data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*<',
-            row_html, re.IGNORECASE
-        )
+        heure_match = re.search(r'data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*<', row_html, re.IGNORECASE)
         if not heure_match:
             continue
-        h_trouvee = heure_match.group(1).strip()
-        # Normaliser pour comparaison (8:48 == 08:48)
-        h_norm = f"{int(h_trouvee.split(':')[0]):02d}:{h_trouvee.split(':')[1]}"
-        h_cible_norm = f"{int(heure_cible.split(':')[0]):02d}:{heure_cible.split(':')[1]}"
-
-        if h_norm != h_cible_norm:
+        h = f"{int(heure_match.group(1).split(':')[0]):02d}:{heure_match.group(1).split(':')[1]}"
+        if h != heure_norm:
             continue
-
         confirm_match = re.search(
             r'data-colno="0"[^>]*>.*?href="([^"]*req=confirm[^"]*)"',
             row_html, re.DOTALL | re.IGNORECASE
         )
         if confirm_match:
-            confirm_url = confirm_match.group(1).replace("&amp;", "&")
-            logger.info(f"[Booker GGG] Format 2 (autogrid) trouve: {confirm_url}")
-            await page.goto(confirm_url, timeout=TIMEOUT, wait_until="domcontentloaded")
-            return True
+            return confirm_match.group(1).replace("&amp;", "&")
 
-    # Logger les heures trouvées pour debug
-    heures_trouvees = re.findall(r'data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*<', html)
-    logger.warning(f"[Booker GGG] Heure {heure_cible} non trouvee. Heures dispo: {heures_trouvees[:10]}")
-    return False
+    # Chercher toutes les heures disponibles pour debug
+    heures = re.findall(r'data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*<', html)
+    if heures:
+        logger.info(f"[Booker GGG] Heures dans HTML: {heures}")
+    else:
+        logger.warning(f"[Booker GGG] Aucune heure autogrid. HTML size: {len(html)}")
+
+    return ""
 
 
 async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, password: str) -> dict:
