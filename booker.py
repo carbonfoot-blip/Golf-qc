@@ -250,6 +250,12 @@ def _trouver_confirm_url(html: str, heure_cible: str, slug: str) -> str:
 
 
 async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, password: str, date: str = "", heure: str = "", nb_joueurs: int = 2) -> dict:
+    """
+    Flow hybride:
+    1. httpx: Login via /marketplace/sessions (sans reCAPTCHA)
+    2. Playwright: Charger la page booking avec les cookies httpx -> génère teetime_freeze + CSRF Angular
+    3. Playwright: POST reservation via fetch() JS dans le contexte Angular
+    """
     slug = terrain.get("chronogolf_slug", terrain["id"])
     club_id = terrain.get("chronogolf_club_id")
     course_id = terrain.get("chronogolf_course_id")
@@ -265,40 +271,31 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
     heure_norm = f"{int(heure.split(':')[0]):02d}:{heure.split(':')[1]}" if heure and ":" in heure else ""
 
     try:
-        # Login via API REST (sans reCAPTCHA)
+        # ── Étape 1: Login httpx (pas de reCAPTCHA) ──────────
         login_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
             "Origin": "https://www.chronogolf.ca",
             "Referer": "https://www.chronogolf.ca/",
-            "X-Requested-With": "XMLHttpRequest",
         }
 
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=login_headers) as client:
-            # Note: follow_redirects=True pour GET, mais on override pour le POST
-            # Login
             login_resp = await client.post(
                 "https://www.chronogolf.ca/marketplace/sessions",
                 json={"session": {"email": username, "password": password}},
             )
             logger.info(f"[Booker Chrono] Login: {login_resp.status_code}")
-
             if login_resp.status_code not in [200, 201]:
                 return {"succes": False, "message": "Identifiants Chronogolf incorrects."}
 
-            session_cookie = client.cookies.get("_chronogolf_session", "")
-            logger.info(f"[Booker Chrono] Session cookie: {'oui' if session_cookie else 'non'}")
-
-            # GET teetimes
+            # GET teetimes pour trouver teetime_id
             teetimes_url = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
             params = {"date": date, "course_id": str(course_id), "nb_holes": "18", "nb_players": str(nb_joueurs)}
             if affiliation_id:
                 params["affiliation_type_ids[]"] = str(affiliation_id)
-
             tt_resp = await client.get(teetimes_url, params=params)
             logger.info(f"[Booker Chrono] Teetimes: {tt_resp.status_code} — {len(tt_resp.text)} chars")
-
             if tt_resp.status_code != 200:
                 return {"succes": False, "message": "Impossible de recuperer les departs.", "url_fallback": url_base}
 
@@ -320,33 +317,42 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             if not teetime_id:
                 return {"succes": False, "message": f"Le depart de {heure} n'est plus disponible.", "url_fallback": url_base}
 
-            # Visiter la page de booking pour obtenir le cookie teetime_freeze
-            booking_page_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
-            booking_resp = await client.get(booking_page_url)
-            logger.info(f"[Booker Chrono] Page booking: {booking_resp.status_code} — cookies: {list(client.cookies.keys())}")
+            cookie_dict = dict(client.cookies)
 
-            # POST reservation — essayer avec X-Requested-With au lieu de CSRF
-            booking_referer = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
-            res_headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
-                "Content-Type": "application/json",
-                "Origin": "https://www.chronogolf.ca",
-                "Referer": booking_referer,
-                "X-Requested-With": "XMLHttpRequest",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-origin",
-            }
-            client.headers.update(res_headers)
+        # ── Étape 2+3: Playwright avec cookies httpx ─────────
+        booking_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
 
-            # Construire rounds_attributes — une entree par joueur
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                locale="fr-CA",
+            )
+            # Injecter cookies de session httpx
+            await context.add_cookies([
+                {"name": k, "value": v, "domain": "www.chronogolf.ca", "path": "/"}
+                for k, v in cookie_dict.items()
+            ])
+            page = await context.new_page()
+
+            # Charger la page booking — Angular génère teetime_freeze + CSRF
+            await page.goto(booking_url, timeout=TIMEOUT, wait_until="networkidle")
+            await page.wait_for_timeout(3000)
+            logger.info(f"[Booker Chrono] Page booking chargee: {page.url} — {len(await page.content())} chars")
+
+            # Extraire CSRF token Angular
+            csrf_token = await page.evaluate(
+                "angular?.element(document)?.injector()?.get('$http')?.defaults?.headers?.common?.['X-CSRF-Token'] || ''"
+            )
+            logger.info(f"[Booker Chrono] CSRF: {'oui' if csrf_token else 'non'}")
+
+            # Construire rounds_attributes
+            import json as _json
             rounds = [
                 {"affiliation_type_id": affiliation_id, "guest": None, "state": "reserved"}
                 for _ in range(nb_joueurs)
             ]
-
-            payload = {
+            reservation_payload = _json.dumps({
                 "reservation": {
                     "club_id": club_id,
                     "teetime_id": teetime_id,
@@ -358,28 +364,42 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     "made_online": True,
                     "rounds_attributes": rounds,
                 }
-            }
+            })
 
-            # Ne pas suivre les redirects — un 302 vers /login = session invalide
-            res_resp = await client.post(
-                "https://www.chronogolf.ca/marketplace/reservations",
-                json=payload,
-                follow_redirects=False,
-            )
-            logger.info(f"[Booker Chrono] Reservation: {res_resp.status_code} — {res_resp.text[:200]}")
+            # POST via fetch JS dans le contexte Angular (session + CSRF + teetime_freeze)
+            js_post = f"""
+                (async () => {{
+                    const resp = await fetch('https://www.chronogolf.ca/marketplace/reservations', {{
+                        method: 'POST',
+                        headers: {{
+                            'Accept': 'application/json, text/plain, */*',
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': '{csrf_token}',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }},
+                        credentials: 'include',
+                        body: '{reservation_payload.replace(chr(39), chr(92)+chr(39))}'
+                    }});
+                    const text = await resp.text();
+                    return JSON.stringify({{status: resp.status, body: text.substring(0, 500)}});
+                }})()
+            """
 
-            if res_resp.status_code in [200, 201]:
+            result_str = await page.evaluate(js_post)
+            result = _json.loads(result_str) if result_str else {}
+            status = result.get("status", 0)
+            body = result.get("body", "")
+            logger.info(f"[Booker Chrono] POST reservation: {status} — {body[:200]}")
+
+            await browser.close()
+
+            if status in [200, 201]:
                 return {"succes": True, "message": "Reservation Chronogolf confirmee! Verifiez votre courriel."}
 
-            if res_resp.status_code == 302:
-                redirect = res_resp.headers.get("location", "")
-                logger.warning(f"[Booker Chrono] 302 redirect vers: {redirect}")
-                # Session non valide pour le POST — essayer avec les cookies du login enrichis
-                logger.warning(f"[Booker Chrono] Cookies: {dict(client.cookies)}")
-                return {"succes": False, "message": "Session Chronogolf insuffisante pour la reservation.", "url_fallback": url_base}
+            if status == 302:
+                return {"succes": False, "message": "Session expirée. Réessayez.", "url_fallback": url_base}
 
-            logger.warning(f"[Booker Chrono] Erreur {res_resp.status_code}: {res_resp.text[:200]}")
-            return {"succes": False, "message": f"Erreur Chronogolf ({res_resp.status_code}).", "url_fallback": url_base}
+            return {"succes": False, "message": f"Erreur Chronogolf ({status}).", "url_fallback": url_base}
 
     except Exception as e:
         logger.error(f"[Booker Chrono] Erreur: {e}")
