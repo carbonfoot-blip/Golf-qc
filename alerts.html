@@ -40,7 +40,7 @@
     .page-header h1 { font-family: 'DM Serif Display', serif; color: white; font-size: 1.75rem; }
     .page-header p { color: var(--green-100); font-size: .875rem; margin-top: .25rem; }
 
-    .stub-banner {
+    . {
       background: var(--amber-light); border-bottom: 2px solid var(--amber);
       padding: .75rem 2rem; font-size: .85rem; color: #7a5000;
       display: flex; align-items: center; gap: .5rem;
@@ -149,9 +149,7 @@
   </div>
 </div>
 
-<div class="stub-banner" id="stub-banner" style="display:none">
-  ⚠️ Mode développement — les SMS sont affichés dans les logs du serveur, pas envoyés. Configurer Twilio dans <code>.env</code> pour l'envoi réel.
-</div>
+
 
 <main>
   <div class="stats-row" id="stats-row">
@@ -173,7 +171,7 @@ const API = window.location.origin + '/api';
 document.addEventListener('DOMContentLoaded', () => {
   // Détecter le mode stub
   fetch(`${API}/courses`).then(() => {
-    document.getElementById('stub-banner').style.display = 'flex';
+    document.getElementById('').style.display = 'flex';
   }).catch(() => {});
 
   chargerAlertes();

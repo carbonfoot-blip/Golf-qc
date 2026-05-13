@@ -749,7 +749,7 @@
 <!-- Modal création alerte -->
 <div class="modal-overlay" id="modal-alerte">
   <div class="modal">
-    <h3>Créer une alerte SMS</h3>
+    <h3>Créer une alerte</h3>
     <p id="modal-desc">Vous serez notifié dès qu'un départ se libère.</p>
 
     <div class="modal-field">
@@ -1185,93 +1185,36 @@ function fermerModal() {
 
 async function confirmerAlerte() {
   if (!pendingAlert) return;
-  const tel = document.getElementById('modal-tel').value.trim();
+  const creds = getCredentials();
+  const profileEmail = creds.notifEmail || '';
+  const emailInput = document.getElementById('modal-email');
+  const emailVal = emailInput ? emailInput.value.trim() : '';
   const intervalle = parseInt(document.getElementById('modal-intervalle').value);
+  const emailFinal = emailVal || profileEmail;
 
-  if (!tel || tel.length < 10) {
-    afficherToast('Veuillez entrer un numéro de téléphone valide', true);
+  if (!emailFinal || !emailFinal.includes('@')) {
+    afficherToast('Veuillez entrer un courriel valide', true);
     return;
   }
-
-  // Normaliser le numéro
-  const telNorm = tel.replace(/\D/g, '');
-  const telFormate = telNorm.length === 10 ? `+1${telNorm}` : `+${telNorm}`;
 
   try {
     const res = await fetch(`${API}/alerts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...pendingAlert, telephone: telFormate, intervalle }),
+      body: JSON.stringify({ ...pendingAlert, email: emailFinal, intervalle }),
     });
-
     if (res.ok) {
-      const data = await res.json();
       fermerModal();
-      afficherToast(`✅ Alerte activée! Vous serez notifié au ${telFormate}`);
+      afficherToast(`Alerte activee! Notification a ${emailFinal}`);
     } else {
       const err = await res.json();
-      afficherToast(err.detail || 'Erreur lors de la création de l\'alerte', true);
+      afficherToast(err.detail || "Erreur creation alerte", true);
     }
   } catch(e) {
     afficherToast('Impossible de contacter le serveur', true);
   }
 }
 
-// ── Credentials (localStorage) ───────────────────────
-const CREDS_KEY = 'golf_alert_creds';
-
-function getCredentials() {
-  try {
-    const raw = localStorage.getItem(CREDS_KEY);
-    return raw ? JSON.parse(raw) : { ggg: null, chrono: null };
-  } catch(e) {
-    return { ggg: null, chrono: null };
-  }
-}
-
-function sauvegarderCredentials(systeme) {
-  const userEl = document.getElementById(`profil-${systeme}-user`);
-  const pwdEl  = document.getElementById(`profil-${systeme}-pwd`);
-  const user   = userEl.value.trim();
-  const pwd    = pwdEl.value.trim();
-
-  if (!user || !pwd) {
-    afficherToast('Veuillez entrer identifiant et mot de passe', true);
-    return;
-  }
-
-  const creds = getCredentials();
-  creds[systeme] = { username: user, password: pwd };
-  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
-
-  // Masquer le mot de passe après sauvegarde
-  pwdEl.value = '••••••••';
-  afficherToast(`✅ Identifiants ${systeme === 'ggg' ? 'GGG Golf' : 'Chronogolf'} sauvegardés`);
-  mettreAJourStatusProfil();
-}
-
-function effacerCredentials(systeme) {
-  const creds = getCredentials();
-  creds[systeme] = null;
-  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
-  if (systeme === 'ggg') {
-    document.getElementById('profil-ggg-user').value = '';
-    document.getElementById('profil-ggg-pwd').value = '';
-  }
-  afficherToast(`Identifiants GGG Golf effacés`);
-  mettreAJourStatusProfil();
-}
-
-// ── Session Chronogolf ────────────────────────────
-let chronoWindow = null;
-
-function etapeOuvrirChrono() {
-  // Ouvrir Chronogolf dans un nouvel onglet
-  chronoWindow = window.open('https://www.chronogolf.ca/fr', '_blank');
-  // Afficher l'étape 2
-  document.getElementById('chrono-step2').style.display = 'block';
-  afficherToast('Connectez-vous sur Chronogolf, puis revenez ici');
-}
 
 async function capturerSessionChrono() {
   // Appeler notre backend pour récupérer la session capturée
