@@ -1,5 +1,5 @@
 """
-scheduler.py — Polling périodique avec logique 1 notification par jour/heure/terrain.
+scheduler.py — Polling alertes avec réservation automatique GGG et notification Chronogolf.
 """
 
 import json
@@ -13,10 +13,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from database import (
     get_active_alerts, mark_alert_notified, log_poll,
-    notification_deja_envoyee, marquer_notification_envoyee
+    notification_deja_envoyee, marquer_notification_envoyee,
 )
 from scraper import get_available_tee_times
 from notifier import send_notification, format_alert_message
+from booker import reserver_depart
 
 logger = logging.getLogger(__name__)
 COURSES_PATH = Path(__file__).parent / "courses.json"
@@ -32,28 +33,21 @@ async def check_all_alerts():
     alerts = await get_active_alerts()
     if not alerts:
         return
-
     courses = load_courses()
     now = datetime.now()
-
     for alert in alerts:
-        # Date expirée
         try:
             if datetime.strptime(alert["date"], "%Y-%m-%d").date() < date.today():
                 await mark_alert_notified(alert["id"])
                 continue
         except Exception:
             pass
-
-        # Vérifier intervalle
         if not _should_check_now(alert["id"], alert.get("intervalle", 15), now):
             continue
-
         terrain = courses.get(alert["terrain_id"])
         if not terrain:
             continue
-
-        logger.info(f"🔍 Alerte #{alert['id']} — {terrain['nom']} {alert['date']} {alert['heure_debut']}–{alert['heure_fin']}")
+        logger.info(f"[Scheduler] Alerte #{alert['id']} — {terrain['nom']} {alert['date']} {alert['heure_debut']}–{alert['heure_fin']}")
         await _check_single_alert(alert, terrain)
 
 
@@ -68,57 +62,107 @@ async def _check_single_alert(alert: dict, terrain: dict):
         )
 
         if not tee_times:
-            await log_poll(alert["id"], "VIDE", "Aucun créneau disponible")
+            await log_poll(alert["id"], "VIDE", "Aucun créneau")
             return
 
-        # Filtrer les départs déjà notifiés aujourd'hui
         email = alert.get("email", "")
+        systeme = terrain.get("systeme", "site_propre")
+
+        # Filtrer départs déjà notifiés
         nouveaux = []
         for tt in tee_times:
             if tt.get("_mock"):
                 continue
-            deja = await notification_deja_envoyee(
-                alert["terrain_id"], alert["date"], tt["heure"], email
-            )
+            deja = await notification_deja_envoyee(alert["terrain_id"], alert["date"], tt["heure"], email)
             if not deja:
                 nouveaux.append(tt)
 
         if not nouveaux:
-            logger.info(f"Alerte #{alert['id']} — départs déjà notifiés")
-            await log_poll(alert["id"], "DEJA_NOTIFIE", "Tous les départs déjà notifiés aujourd'hui")
+            await log_poll(alert["id"], "DEJA_NOTIFIE", "Tous déjà notifiés")
             return
 
-        # Envoyer une notification pour le premier départ disponible
         premier = nouveaux[0]
         date_fr = _format_date_fr(alert["date"])
-        message = format_alert_message(
-            terrain_nom=terrain["nom"],
-            date=date_fr,
-            heure=premier["heure"],
-            nb_joueurs=alert["nb_joueurs"],
-            url=premier["url"],
-        )
 
-        success = send_notification(email, message)
+        # ── GGG Golf : réserver automatiquement ──────────────
+        if systeme == "gggolf":
+            ggg_user = alert.get("ggg_username", "")
+            ggg_pwd  = alert.get("ggg_password", "")
 
-        if success:
-            # Marquer TOUS les nouveaux départs comme notifiés
-            for tt in nouveaux:
-                await marquer_notification_envoyee(
-                    alert["terrain_id"], alert["date"], tt["heure"], email
+            if ggg_user and ggg_pwd:
+                logger.info(f"[Scheduler] Réservation auto GGG: {terrain['nom']} {premier['heure']}")
+                result = await reserver_depart(
+                    terrain=terrain,
+                    confirm_url=premier["url"],
+                    username=ggg_user,
+                    password=ggg_pwd,
+                    date=alert["date"],
+                    heure=premier["heure"],
+                    nb_joueurs=alert["nb_joueurs"],
                 )
-            await mark_alert_notified(alert["id"])
-            logger.info(f"✅ Notification envoyée à {email} pour alerte #{alert['id']}")
+                if result.get("succes"):
+                    message = (
+                        f"✅ Votre départ a été réservé automatiquement!\n\n"
+                        f"🏌️ Terrain : {terrain['nom']}\n"
+                        f"📅 Date    : {date_fr}\n"
+                        f"🕐 Heure   : {premier['heure']}\n"
+                        f"👥 Joueurs : {alert['nb_joueurs']}\n\n"
+                        f"Vérifiez votre courriel GGG Golf pour la confirmation."
+                    )
+                    subject = f"✅ Départ réservé — {terrain['nom']} {premier['heure']}"
+                    await _envoyer_et_marquer(alert, terrain, nouveaux, email, message, subject, date_fr)
+                    return
+                else:
+                    # Réservation échouée — notifier quand même
+                    logger.warning(f"[Scheduler] Réservation auto échouée: {result.get('message')}")
+                    message = (
+                        f"⚠️ Un départ est disponible mais la réservation auto a échoué.\n\n"
+                        f"🏌️ Terrain : {terrain['nom']}\n"
+                        f"📅 Date    : {date_fr}\n"
+                        f"🕐 Heure   : {premier['heure']}\n"
+                        f"👥 Joueurs : {alert['nb_joueurs']}\n\n"
+                        f"👉 Réservez rapidement : {premier['url']}"
+                    )
+            else:
+                # Pas de credentials GGG — notifier sans réserver
+                message = format_alert_message(terrain['nom'], date_fr, premier['heure'], alert['nb_joueurs'], premier['url'])
 
-        await log_poll(
-            alert["id"],
-            "TROUVE" if success else "ERREUR_EMAIL",
-            f"Heure: {premier['heure']}, Email: {success}",
-        )
+        # ── Chronogolf : envoyer lien direct ─────────────────
+        elif systeme == "chronogolf":
+            slug = terrain.get("chronogolf_slug", terrain["id"])
+            url_reservation = f"https://www.chronogolf.ca/club/{slug}"
+            message = (
+                f"⛳ Un départ est disponible sur Chronogolf!\n\n"
+                f"🏌️ Terrain : {terrain['nom']}\n"
+                f"📅 Date    : {date_fr}\n"
+                f"🕐 Heure   : {premier['heure']}\n"
+                f"👥 Joueurs : {alert['nb_joueurs']}\n\n"
+                f"👉 Réservez maintenant (dépêchez-vous!) :\n{url_reservation}"
+            )
+
+        else:
+            message = format_alert_message(terrain['nom'], date_fr, premier['heure'], alert['nb_joueurs'], premier['url'])
+
+        subject = f"⛳ Départ disponible — {terrain['nom']} {premier['heure']}"
+        await _envoyer_et_marquer(alert, terrain, nouveaux, email, message, subject, date_fr)
 
     except Exception as e:
-        logger.error(f"Erreur alerte #{alert['id']}: {e}")
+        logger.error(f"[Scheduler] Erreur alerte #{alert['id']}: {e}")
         await log_poll(alert["id"], "ERREUR", str(e))
+
+
+async def _envoyer_et_marquer(alert, terrain, nouveaux, email, message, subject, date_fr):
+    success = send_notification(email, message, subject)
+    if success:
+        for tt in nouveaux:
+            await marquer_notification_envoyee(alert["terrain_id"], alert["date"], tt["heure"], email)
+        await mark_alert_notified(alert["id"])
+        logger.info(f"[Scheduler] ✅ Notification envoyée à {email}")
+    await log_poll(
+        alert["id"],
+        "TROUVE" if success else "ERREUR_EMAIL",
+        f"Heure: {nouveaux[0]['heure']}, Email: {success}",
+    )
 
 
 _last_checks: dict[int, datetime] = {}
@@ -147,8 +191,13 @@ def _format_date_fr(date_str: str) -> str:
 
 
 def start_scheduler():
-    scheduler.add_job(check_all_alerts, trigger=IntervalTrigger(minutes=1),
-                      id="check_alerts", replace_existing=True, max_instances=1)
+    scheduler.add_job(
+        check_all_alerts,
+        trigger=IntervalTrigger(minutes=1),
+        id="check_alerts",
+        replace_existing=True,
+        max_instances=1,
+    )
     scheduler.start()
     logger.info("✅ Scheduler démarré")
 
