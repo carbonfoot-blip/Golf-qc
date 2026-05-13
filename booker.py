@@ -278,39 +278,55 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             "Referer": "https://www.chronogolf.ca/",
         }
 
-        async with httpx.AsyncClient(
-            timeout=HTTP_TIMEOUT,
-            follow_redirects=True,
-            headers=headers,
-        ) as client:
-
-            # ── Étape 1 : Login via API REST ─────────────────
+        # ── Étape 1 : Login via API REST ─────────────────
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers) as login_client:
             login_payload = {"session": {"email": username, "password": password}}
-            login_resp = await client.post(
+            login_resp = await login_client.post(
                 "https://www.chronogolf.ca/marketplace/sessions",
                 json=login_payload,
             )
             logger.info(f"[Booker Chrono] Login: {login_resp.status_code}")
 
             if login_resp.status_code not in [200, 201]:
-                logger.warning(f"[Booker Chrono] Login echoue: {login_resp.text[:200]}")
                 return {"succes": False, "message": "Identifiants Chronogolf incorrects."}
 
-            # Cookies de session établis automatiquement par httpx
-            logger.info(f"[Booker Chrono] Cookies: {list(client.cookies.keys())[:5]}")
+            cookie_dict = dict(login_client.cookies)
+            logger.info(f"[Booker Chrono] Cookies: {list(cookie_dict.keys())[:5]}")
 
-            # Extraire le CSRF token depuis les headers de la reponse login
-            csrf_token = login_resp.headers.get("X-Csrf-Token", "")
-            if not csrf_token:
-                # Essayer depuis les cookies
-                csrf_token = client.cookies.get("X-CSRF-Token", "")
-            if not csrf_token:
-                # GET une page pour obtenir le CSRF token
-                csrf_resp = await client.get("https://www.chronogolf.ca/marketplace/v2/session")
-                csrf_token = csrf_resp.headers.get("X-Csrf-Token", "")
-            logger.info(f"[Booker Chrono] CSRF token: {'oui' if csrf_token else 'non'} — {csrf_token[:20] if csrf_token else ''}")
-            if csrf_token:
-                client.headers["X-Csrf-Token"] = csrf_token
+        # ── Étape 2 : Extraire CSRF token via Playwright ─────
+        csrf_token = ""
+        try:
+            async with async_playwright() as pw2:
+                browser2 = await pw2.chromium.launch(headless=True)
+                ctx2 = await browser2.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                )
+                # Injecter les cookies de session
+                await ctx2.add_cookies([
+                    {"name": k, "value": v, "domain": "www.chronogolf.ca", "path": "/"}
+                    for k, v in cookie_dict.items()
+                ])
+                page2 = await ctx2.new_page()
+                await page2.goto("https://www.chronogolf.ca/dashboard", timeout=TIMEOUT, wait_until="domcontentloaded")
+                await page2.wait_for_timeout(3000)
+                csrf_token = await page2.evaluate(
+                    "angular.element(document).injector()?.get('$http')?.defaults?.headers?.common?.['X-CSRF-Token'] || ''"
+                )
+                logger.info(f"[Booker Chrono] CSRF: {'oui' if csrf_token else 'non'}")
+                await browser2.close()
+        except Exception as e:
+            logger.warning(f"[Booker Chrono] CSRF extraction: {e}")
+
+        # ── Étape 3-5 : API avec cookies et CSRF ─────────────
+        if csrf_token:
+            headers["X-Csrf-Token"] = csrf_token
+
+        async with httpx.AsyncClient(
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+            cookies=cookie_dict,
+            headers=headers,
+        ) as client:
 
             # ── Étape 2 : GET teetimes pour trouver teetime_id ──
             teetimes_url_api = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
