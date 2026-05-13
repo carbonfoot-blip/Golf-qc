@@ -250,8 +250,168 @@ def _trouver_confirm_url(html: str, heure_cible: str, slug: str) -> str:
 
 
 async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, password: str) -> dict:
-    return {
-        "succes": False,
-        "message": "La réservation directe Chronogolf n'est pas encore disponible. Cliquez sur 'Voir sur Chronogolf' pour réserver.",
-        "url_fallback": terrain.get("url_reservation", confirm_url),
-    }
+    slug = terrain.get("chronogolf_slug", terrain["id"])
+    club_id = terrain.get("chronogolf_club_id")
+    course_id = terrain.get("chronogolf_course_id")
+    affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
+    url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
+    url_base = f"https://www.chronogolf.ca/club/{slug}"
+    login_url = "https://www.chronogolf.com/login"
+
+    logger.info(f"[Booker Chrono] Debut: {terrain['nom']}")
+
+    if not club_id or not course_id:
+        return {"succes": False, "message": "Configuration manquante pour ce terrain.", "url_fallback": url_base}
+
+    # Extraire heure/date depuis confirm_url
+    heure_cible = ""
+    date_val = ""
+    nb_joueurs_val = 2
+    if confirm_url:
+        import re as _re
+        for key, attr in [("heure", "heure_cible"), ("date", "date_val")]:
+            m = _re.search(rf"{key}=([^&]+)", confirm_url)
+            if m:
+                if key == "heure":
+                    heure_cible = m.group(1)
+                else:
+                    date_val = m.group(1)
+        m2 = _re.search(r"nb_joueurs=(\d+)", confirm_url)
+        if m2:
+            nb_joueurs_val = int(m2.group(1))
+
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                locale="fr-CA",
+            )
+            page = await context.new_page()
+
+            # Login
+            await page.goto(login_url, timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(2000)
+
+            email_field = await page.query_selector("input[name='email'], input[id='sessionEmail']")
+            pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword']")
+
+            if not email_field or not pwd_field:
+                await browser.close()
+                return {"succes": False, "message": "Page de connexion Chronogolf introuvable."}
+
+            await email_field.fill(username)
+            await pwd_field.fill(password)
+
+            login_btn = await page.query_selector("button:has-text('Log in'), button[type='submit']")
+            if login_btn:
+                await login_btn.click()
+            else:
+                await pwd_field.press("Enter")
+
+            try:
+                await page.wait_for_url("https://www.chronogolf.com/**", timeout=15000)
+            except Exception:
+                await page.wait_for_timeout(3000)
+
+            logger.info(f"[Booker Chrono] Apres login: {page.url}")
+
+            if "login" in page.url.lower():
+                await browser.close()
+                return {"succes": False, "message": "Identifiants Chronogolf incorrects."}
+
+            # Extraire cookies
+            pw_cookies = await context.cookies()
+            cookie_dict = {c["name"]: c["value"] for c in pw_cookies}
+            logger.info(f"[Booker Chrono] {len(cookie_dict)} cookies")
+
+            await browser.close()
+
+        # API avec httpx + cookies de session
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": "https://www.chronogolf.com",
+            "Referer": f"https://www.chronogolf.com/club/{slug}/booking",
+        }
+
+        async with httpx.AsyncClient(
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+            cookies=cookie_dict,
+            headers=headers,
+        ) as client:
+
+            # Verifier session
+            sess = await client.get("https://www.chronogolf.com/marketplace/v2/session")
+            logger.info(f"[Booker Chrono] Session: {sess.status_code}")
+            if sess.status_code != 200:
+                return {"succes": False, "message": "Session invalide. Reconnectez-vous.", "url_fallback": url_base}
+
+            # Extraire CSRF token depuis les cookies ou la session
+            csrf_token = cookie_dict.get("X-CSRF-Token", "") or cookie_dict.get("csrf_token", "")
+            logger.info(f"[Booker Chrono] CSRF token: {bool(csrf_token)}")
+
+            # GET teetimes pour trouver teetime_id
+            teetimes_url_api = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
+            params = {"date": date_val, "course_id": str(course_id), "nb_holes": "18", "nb_players": str(nb_joueurs_val)}
+            if affiliation_id:
+                params["affiliation_type_ids[]"] = str(affiliation_id)
+
+            tt_resp = await client.get(teetimes_url_api, params=params)
+            logger.info(f"[Booker Chrono] Teetimes: {tt_resp.status_code} — {len(tt_resp.text)} chars")
+
+            if tt_resp.status_code != 200:
+                return {"succes": False, "message": "Impossible de recuperer les departs.", "url_fallback": url_base}
+
+            slots = tt_resp.json()
+            if isinstance(slots, dict):
+                slots = slots.get("tee_times") or slots.get("teetimes") or []
+
+            teetime_id = None
+            heure_norm = f"{int(heure_cible.split(':')[0]):02d}:{heure_cible.split(':')[1]}" if heure_cible and ":" in heure_cible else ""
+
+            for slot in slots:
+                start = slot.get("start_time") or slot.get("time") or ""
+                if "T" in str(start):
+                    start = str(start).split("T")[1][:5]
+                h = f"{int(start.split(':')[0]):02d}:{start.split(':')[1]}" if ":" in str(start) else ""
+                if h == heure_norm:
+                    teetime_id = slot.get("id")
+                    logger.info(f"[Booker Chrono] teetime_id: {teetime_id} pour {h}")
+                    break
+
+            if not teetime_id:
+                logger.warning(f"[Booker Chrono] Heure {heure_cible} non trouvee")
+                return {"succes": False, "message": f"Le depart de {heure_cible} n'est plus disponible.", "url_fallback": url_base}
+
+            # POST reservation
+            if csrf_token:
+                client.headers["X-Csrf-Token"] = csrf_token
+
+            payload = {
+                "reservation": {
+                    "club_id": club_id,
+                    "teetime_id": teetime_id,
+                    "state": "confirmed",
+                    "holes": 18,
+                    "medium": "profile",
+                    "source": "chronogolf",
+                    "rounds_attributes": [{"affiliation_type_id": affiliation_id, "state": "reserved"}],
+                }
+            }
+
+            res_resp = await client.post("https://www.chronogolf.com/marketplace/reservations", json=payload)
+            logger.info(f"[Booker Chrono] Reservation: {res_resp.status_code}")
+
+            if res_resp.status_code in [200, 201]:
+                logger.info(f"[Booker Chrono] SUCCES!")
+                return {"succes": True, "message": "Reservation Chronogolf confirmee! Vous recevrez une confirmation par courriel."}
+
+            logger.warning(f"[Booker Chrono] Erreur: {res_resp.text[:300]}")
+            return {"succes": False, "message": f"Erreur reservation Chronogolf ({res_resp.status_code}).", "url_fallback": url_base}
+
+    except Exception as e:
+        logger.error(f"[Booker Chrono] Erreur: {e}")
+        return {"succes": False, "message": "Erreur technique Chronogolf.", "url_fallback": terrain.get("url_reservation", confirm_url)}
