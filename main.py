@@ -327,6 +327,29 @@ async def forcer_check(alert_id: int):
     return {"message": f"Check forcé pour alerte #{alert_id}"}
 
 
+@app.get("/chrono-auth")
+async def serve_chrono_auth():
+    f = FRONTEND_DIR / "chrono-auth.html"
+    if f.exists():
+        return FileResponse(str(f))
+    raise HTTPException(status_code=404, detail="chrono-auth.html introuvable")
+
+@app.post("/api/chrono-session")
+async def get_chrono_session(request: Request):
+    cookies = request.cookies
+    session = cookies.get("_chronogolf_session", "")
+    cf_clearance = cookies.get("cf_clearance", "")
+    if not session:
+        return {"valide": False}
+    return {
+        "valide": True,
+        "email": "",
+        "session": session,
+        "cf_clearance": cf_clearance,
+        "duree_heures": 23,
+    }
+
+
 # ─── Servir le frontend ───────────────────────────────
 BASE = Path(__file__).parent
 FRONTEND_DIR = BASE / "frontend" if (BASE / "frontend").exists() else BASE
