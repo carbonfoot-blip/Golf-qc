@@ -129,13 +129,30 @@ async def _reserver_gggolf(
                 # Attendre que le tableau de résultats apparaisse
                 try:
                     await page.wait_for_selector(
-                        "#agTable, table.autogrid, .teetimes_results-lineblock, [class*='autogrid'], [class*='teetimes_results']",
-                        timeout=15000
+                        "#agTable, table.autogrid, tr.autogridEven, tr.autogridOdd, "
+                        ".teetimes_results-lineblock, [class*='teetimes_results']",
+                        timeout=20000
                     )
                     logger.info(f"[Booker GGG] Tableau resultats apparu")
                 except PwTimeout:
-                    logger.warning(f"[Booker GGG] Tableau non apparu — attente fixe 4s")
-                    await page.wait_for_timeout(4000)
+                    # Essayer soumission via JS
+                    logger.warning(f"[Booker GGG] Tableau non apparu — submit JS")
+                    js_submit = (
+                        "var f = document.getElementById('ag') || "
+                        "document.querySelector('form.form-inline') || "
+                        "document.querySelector('form'); "
+                        "if(f) f.submit();"
+                    )
+                    await page.evaluate(js_submit)
+                    try:
+                        await page.wait_for_selector(
+                            "#agTable, tr.autogridEven, tr.autogridOdd",
+                            timeout=10000
+                        )
+                        logger.info(f"[Booker GGG] Tableau apparu apres submit JS")
+                    except PwTimeout:
+                        logger.warning(f"[Booker GGG] Tableau toujours absent — attente 5s")
+                        await page.wait_for_timeout(5000)
 
             search_content = await page.content()
             logger.info(f"[Booker GGG] Resultats recherche: {len(search_content)} chars — URL: {page.url}")
@@ -220,7 +237,6 @@ async def _trouver_et_cliquer_depart(page, heure_cible: str, terrain: dict) -> b
     html = await page.content()
     slug = terrain.get("ggg_slug", terrain["id"])
     logger.info(f"[Booker GGG] Recherche heure {heure_cible} dans {len(html)} chars")
-    logger.info(f"[Booker GGG] HTML[5000:7000]: {html[5000:7000]}")
 
     # Format 1 : teetimes_results-hour (Beloeil)
     bloc_pattern = re.compile(
