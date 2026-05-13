@@ -753,8 +753,11 @@
     <p id="modal-desc">Vous serez notifié dès qu'un départ se libère.</p>
 
     <div class="modal-field">
-      <label>Numéro de téléphone</label>
-      <input type="tel" id="modal-tel" placeholder="+1 (514) 000-0000"/>
+      <label>Courriel de notification</label>
+      <input type="email" id="modal-email" placeholder="votre@email.com" autocomplete="email"/>
+      <div style="font-size:.72rem;color:var(--text-muted);margin-top:.25rem">
+        Vous recevrez un courriel dès qu'un départ se libère (1 notification max par heure/terrain/jour).
+      </div>
     </div>
     <div class="modal-field">
       <label>Vérifier toutes les…</label>
@@ -1157,6 +1160,10 @@ function ouvrirModal(terrainId, terrainNom, date, heureDebut, heureFin, joueurs)
   const dateF = new Date(date).toLocaleDateString('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' });
   document.getElementById('modal-desc').textContent =
     `${terrainNom} · ${dateF} · ${heureDebut}–${heureFin} · ${joueurs} joueur(s)`;
+  // Pré-remplir l'email depuis le profil
+  const creds = getCredentials();
+  const emailEl = document.getElementById('modal-email');
+  if (emailEl && creds.notifEmail) emailEl.value = creds.notifEmail;
   document.getElementById('modal-alerte').classList.add('open');
 }
 
@@ -1242,17 +1249,52 @@ function effacerCredentials(systeme) {
   mettreAJourStatusProfil();
 }
 
+function sauvegarderEmailNotif() {
+  const email = document.getElementById('profil-email-notif').value.trim();
+  if (!email || !email.includes('@')) {
+    afficherToast('Veuillez entrer un courriel valide', true);
+    return;
+  }
+  const creds = getCredentials();
+  creds.notifEmail = email;
+  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+  afficherToast('✅ Courriel de notification sauvegardé');
+  mettreAJourStatusProfil();
+  // Pré-remplir le modal alerte
+  const modalEmail = document.getElementById('modal-email');
+  if (modalEmail) modalEmail.value = email;
+}
+
+function effacerEmailNotif() {
+  const creds = getCredentials();
+  delete creds.notifEmail;
+  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+  document.getElementById('profil-email-notif').value = '';
+  afficherToast('Courriel de notification effacé');
+  mettreAJourStatusProfil();
+}
+
 function mettreAJourStatusProfil() {
   const creds = getCredentials();
   const gggStatus    = document.getElementById('ggg-status');
   const chronoStatus = document.getElementById('chrono-status');
+  const emailStatus  = document.getElementById('email-notif-status');
   if (gggStatus)    gggStatus.textContent    = creds.ggg    ? `✅ ${creds.ggg.username}`    : '○ Non configuré';
   if (chronoStatus) chronoStatus.textContent = creds.chrono ? `✅ ${creds.chrono.username}` : '○ Non configuré';
+  if (emailStatus)  emailStatus.textContent  = creds.notifEmail ? `✅ ${creds.notifEmail}` : '○ Non configuré';
 
-  // Mettre à jour le bouton profil dans le header
+  // Pré-remplir le champ email notif si sauvegardé
+  const emailInput = document.getElementById('profil-email-notif');
+  if (emailInput && creds.notifEmail) emailInput.value = creds.notifEmail;
+
+  // Pré-remplir modal alerte
+  const modalEmail = document.getElementById('modal-email');
+  if (modalEmail && creds.notifEmail && !modalEmail.value) modalEmail.value = creds.notifEmail;
+
+  // Bouton profil
   const btn = document.getElementById('btn-profil');
   if (btn) {
-    const hasCreds = creds.ggg || creds.chrono;
+    const hasCreds = creds.ggg || creds.chrono || creds.notifEmail;
     btn.textContent = hasCreds ? '👤 Profil ✅' : '👤 Profil';
   }
 }

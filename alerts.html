@@ -168,7 +168,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const API = 'https://golf-qc.up.railway.app/api';
+const API = 'http://127.0.0.1:8000/api';
 
 document.addEventListener('DOMContentLoaded', () => {
   // Détecter le mode stub
@@ -254,7 +254,7 @@ function carteAlerteHTML(a) {
         <span class="alert-detail">📅 ${dateF}</span>
         <span class="alert-detail">🕐 ${a.heure_debut} – ${a.heure_fin}</span>
         <span class="alert-detail">👥 ${a.nb_joueurs} joueur(s)</span>
-        <span class="alert-detail">📱 ${a.telephone}</span>
+        <span class="alert-detail">📧 ${a.email}</span>
         <span class="alert-detail">⏱ Toutes les ${a.intervalle} min</span>
       </div>
       <div class="alert-status ${statusClass}">${statusLabel}</div>
