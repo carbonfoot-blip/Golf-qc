@@ -1165,7 +1165,10 @@ function carteTerrainHTML(terrain, joueurs, date, heureDebut, heureFin, inApexSe
 // ── Modal alerte ──────────────────────────────────────
 function ouvrirModal(terrainId, terrainNom, date, heureDebut, heureFin, joueurs) {
   pendingAlert = { terrain_id: terrainId, terrain_nom: terrainNom, date, heure_debut: heureDebut, heure_fin: heureFin, nb_joueurs: joueurs };
-  const dateF = new Date(date).toLocaleDateString('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' });
+  // Construire date locale sans decalage UTC
+  const [y, m, d] = date.split('-').map(Number);
+  const dateObj = new Date(y, m - 1, d);
+  const dateF = dateObj.toLocaleDateString('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' });
   document.getElementById('modal-desc').textContent =
     `${terrainNom} · ${dateF} · ${heureDebut}–${heureFin} · ${joueurs} joueur(s)`;
   // Pré-remplir l'email depuis le profil
