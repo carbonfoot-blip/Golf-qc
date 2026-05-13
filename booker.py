@@ -293,15 +293,16 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             cookie_dict = dict(login_client.cookies)
             logger.info(f"[Booker Chrono] Cookies: {list(cookie_dict.keys())[:5]}")
 
-        # ── Étape 2 : Extraire CSRF token via Playwright ─────
+        # ── Étape 2 : Playwright charge le dashboard et extrait CSRF + cookies frais ──
         csrf_token = ""
+        fresh_cookies = cookie_dict.copy()
         try:
             async with async_playwright() as pw2:
                 browser2 = await pw2.chromium.launch(headless=True)
                 ctx2 = await browser2.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
                 )
-                # Injecter les cookies de session
+                # Injecter les cookies du login
                 await ctx2.add_cookies([
                     {"name": k, "value": v, "domain": "www.chronogolf.ca", "path": "/"}
                     for k, v in cookie_dict.items()
@@ -309,22 +310,30 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 page2 = await ctx2.new_page()
                 await page2.goto("https://www.chronogolf.ca/dashboard", timeout=TIMEOUT, wait_until="domcontentloaded")
                 await page2.wait_for_timeout(3000)
+
+                # Extraire CSRF token
                 csrf_token = await page2.evaluate(
                     "angular.element(document).injector()?.get('$http')?.defaults?.headers?.common?.['X-CSRF-Token'] || ''"
                 )
                 logger.info(f"[Booker Chrono] CSRF: {'oui' if csrf_token else 'non'}")
+
+                # Extraire les cookies frais de Playwright (apres chargement Angular)
+                pw_cookies = await ctx2.cookies()
+                fresh_cookies = {c["name"]: c["value"] for c in pw_cookies}
+                logger.info(f"[Booker Chrono] Cookies frais: {list(fresh_cookies.keys())[:5]}")
+
                 await browser2.close()
         except Exception as e:
-            logger.warning(f"[Booker Chrono] CSRF extraction: {e}")
+            logger.warning(f"[Booker Chrono] CSRF/cookies: {e}")
 
-        # ── Étape 3-5 : API avec cookies et CSRF ─────────────
+        # ── Étape 3-5 : API avec cookies frais et CSRF ───────
         if csrf_token:
             headers["X-Csrf-Token"] = csrf_token
 
         async with httpx.AsyncClient(
             timeout=HTTP_TIMEOUT,
             follow_redirects=True,
-            cookies=cookie_dict,
+            cookies=fresh_cookies,
             headers=headers,
         ) as client:
 
