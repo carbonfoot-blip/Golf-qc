@@ -216,8 +216,10 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             page = await context.new_page()
 
             # ── Login ──────────────────────────────────────────
-            await page.goto(login_url, timeout=TIMEOUT, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000)
+            await page.goto(login_url, timeout=TIMEOUT, wait_until="networkidle")
+            await page.wait_for_timeout(3000)  # Laisser Angular et reCAPTCHA charger
+
+            logger.info(f"[Booker Chrono] Page login chargee: {len(await page.content())} chars")
 
             email_field = await page.query_selector("input[name='email'], input[id='sessionEmail']")
             pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword']")
@@ -226,8 +228,15 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
                 await browser.close()
                 return {"succes": False, "message": "Page de connexion Chronogolf introuvable."}
 
-            await email_field.fill(username)
-            await pwd_field.fill(password)
+            # Remplir lentement pour simuler un vrai utilisateur
+            await email_field.click()
+            await page.wait_for_timeout(500)
+            await email_field.type(username, delay=50)
+            await page.wait_for_timeout(300)
+            await pwd_field.click()
+            await page.wait_for_timeout(300)
+            await pwd_field.type(password, delay=50)
+            await page.wait_for_timeout(500)
 
             login_btn = await page.query_selector("button:has-text('Log in'), button[type='submit']")
             if login_btn:
@@ -235,15 +244,21 @@ async def _reserver_chronogolf(terrain, username, password, date, heure, nb_joue
             else:
                 await pwd_field.press("Enter")
 
+            # Attendre la redirection
             try:
-                await page.wait_for_url("https://www.chronogolf.com/**", timeout=15000)
+                await page.wait_for_function(
+                    "window.location.href.indexOf('/login') === -1",
+                    timeout=20000
+                )
             except Exception:
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(5000)
 
             logger.info(f"[Booker Chrono] Apres login: {page.url}")
             if "login" in page.url.lower():
+                page_content = await page.content()
+                logger.warning(f"[Booker Chrono] Login echoue. HTML[0:300]: {page_content[:300]}")
                 await browser.close()
-                return {"succes": False, "message": "Identifiants Chronogolf incorrects."}
+                return {"succes": False, "message": "Identifiants Chronogolf incorrects ou reCAPTCHA bloqué."}
 
             # ── Naviguer vers la page de booking du terrain ───
             booking_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
