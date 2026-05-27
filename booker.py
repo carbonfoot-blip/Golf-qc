@@ -116,6 +116,14 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             logger.info(f"[Booker Chrono] Login OK: {page.url}")
 
+            # Fermer le modal backdrop si encore présent
+            await page.wait_for_timeout(1000)
+            backdrop = await page.query_selector(".modal-backdrop, .session-lightbox.active")
+            if backdrop:
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(1000)
+                logger.info(f"[Booker Chrono] Modal fermé via Escape")
+
             # Si on est sur /fr, naviguer vers le club
             if "/fr" in page.url and slug not in page.url:
                 await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
@@ -127,9 +135,10 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             # Vérifier si connecté
             connected = await page.evaluate("""
                 (() => {
-                    return document.body.innerText.includes('Déconnexion') ||
-                           document.body.innerText.includes('Mon compte') ||
-                           document.body.innerText.includes('Felix');
+                    var html = document.documentElement.innerHTML;
+                    return html.includes('Déconnexion') || html.includes('logout') ||
+                           html.includes('Mon compte') || html.includes('Felix') ||
+                           document.querySelector('.user-menu, .user-name, [ng-if*="session.user"]') !== null;
                 })()
             """)
             logger.info(f"[Booker Chrono] Club: {page.url} — connecté: {connected} — {len(await page.content())} chars")
