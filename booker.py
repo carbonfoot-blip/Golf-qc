@@ -108,9 +108,9 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             
             # Vérifier si connecté sur la page du club
             connected = await page.evaluate("""
-                document.querySelector('[ng-controller*="club"], .user-name, a:contains("Déconnexion"), a[href*="logout"]') !== null ||
                 document.body.innerText.includes('Déconnexion') ||
-                document.body.innerText.includes('Mon compte')
+                document.body.innerText.includes('Mon compte') ||
+                document.body.innerText.includes('Felix')
             """)
             logger.info(f"[Booker Chrono] Club: {page.url} — connecté: {connected} — {len(await page.content())} chars")
 
