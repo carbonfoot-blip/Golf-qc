@@ -121,43 +121,47 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             logger.info(f"[Booker Chrono] Login réussi!")
 
-            # ── 2. Naviguer vers la page booking ─────────────────────────────
-            await page.goto(booking_url, timeout=TIMEOUT, wait_until="domcontentloaded")
-            await page.wait_for_timeout(4000)
-            logger.info(f"[Booker Chrono] Booking: {page.url}")
+            # ── 2. Naviguer vers la page du club (pas /booking/) ─────────────
+            club_url = f"https://www.chronogolf.ca/club/{slug}"
+            await page.goto(club_url, timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(5000)
+            logger.info(f"[Booker Chrono] Club page: {page.url} — {len(await page.content())} chars")
 
-            # ── 3. Sélectionner la date ───────────────────────────────────────
-            # Entrer la date dans le calendrier Angular
-            date_set = await page.evaluate(f"""
-                (function() {{
-                    // Trouver le scope Angular de la page de booking
-                    var el = document.querySelector('[ng-controller]') || document.querySelector('[data-ng-controller]');
-                    if (!el) return 'no-controller';
-                    var scope = angular.element(el).scope();
-                    if (!scope) return 'no-scope';
-                    scope.$apply(function() {{
-                        if (scope.selectedDate !== undefined) scope.selectedDate = new Date('{date}T12:00:00');
-                        if (scope.date !== undefined) scope.date = '{date}';
-                        if (scope.search) scope.search.date = '{date}';
-                    }});
-                    return 'ok';
-                }})()
-            """)
-            logger.info(f"[Booker Chrono] Date set: {date_set}")
+            # ── 3. Sélectionner la date dans le calendrier ────────────────────
+            # Entrer la date dans le champ date de l'interface
+            date_parts = date.split('-')
+            date_fr = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}"  # dd/mm/yyyy
 
-            # Cliquer sur la date dans le calendrier si visible
-            try:
-                # Chercher le jour dans le calendrier
-                day = str(int(date.split('-')[2]))
-                date_btn = await page.query_selector(f"td.day:not(.old):not(.new):has-text('{day}'), .datepicker-days td:not(.old):not(.new):has-text('{day}')")
-                if date_btn:
-                    await date_btn.click()
-                    await page.wait_for_timeout(2000)
-                    logger.info(f"[Booker Chrono] Date cliquée: {day}")
-            except Exception as e:
-                logger.warning(f"[Booker Chrono] Clic date: {e}")
+            # Chercher le champ date
+            date_input = await page.query_selector("input[type='date'], input[ng-model*='date'], input[placeholder*='date'], input[placeholder*='Date']")
+            if date_input:
+                await date_input.fill(date)
+                await page.wait_for_timeout(1000)
+                logger.info(f"[Booker Chrono] Date remplie: {date}")
+            else:
+                # Cliquer sur la date dans le calendrier bootstrap
+                day = str(int(date_parts[2]))
+                try:
+                    # Naviguer au bon mois si nécessaire
+                    month_year = await page.query_selector(".datepicker-switch, .picker-switch")
+                    logger.info(f"[Booker Chrono] Calendrier: {'trouvé' if month_year else 'non trouvé'}")
+
+                    day_btn = await page.query_selector(f"td.day:not(.old):not(.new) >> text='{day}'")
+                    if not day_btn:
+                        day_btn = await page.query_selector(f"[class*='day']:not([class*='old']):not([class*='new'])")
+                    if day_btn:
+                        await day_btn.click()
+                        await page.wait_for_timeout(2000)
+                        logger.info(f"[Booker Chrono] Jour {day} cliqué dans calendrier")
+                except Exception as e:
+                    logger.warning(f"[Booker Chrono] Clic date: {e}")
 
             await page.wait_for_timeout(2000)
+
+            # ── 4. Chercher le départ voulu ───────────────────────────────────
+            # Logger ce qui est disponible sur la page
+            page_text_sample = await page.evaluate("document.body.innerText.substring(0, 2000)")
+            logger.info(f"[Booker Chrono] Page text sample: {page_text_sample[:500]}")
 
             # ── 4. Intercepter les requêtes POST reservation ──────────────────
             reservation_result = {"done": False}
