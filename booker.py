@@ -115,6 +115,10 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs)
                     logger.info(f"[Booker GGG] HTML riche obtenu")
                     break
 
+        # Logger le HTML pour debug
+        if search_html:
+            logger.info(f"[Booker GGG] HTML debug: {search_html[3000:4500]}")
+
         if not search_html:
             # Fallback: essayer sans cookies (session anonyme comme le scraper)
             logger.info(f"[Booker GGG] Fallback sans cookies de login")
