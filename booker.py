@@ -70,11 +70,14 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             await page.wait_for_timeout(3000)
 
             all_cookies = await context.cookies()
+            cookie_dict_pw = {}
             for c in all_cookies:
+                cookie_dict_pw[c["name"]] = c["value"]
                 if c["name"] == "cf_clearance":
                     cf_clearance = c["value"]
                 elif c["name"] == "_chronogolf_session":
                     chronogolf_session = c["value"]
+            logger.info(f"[Booker Chrono] Cookies Playwright: {list(cookie_dict_pw.keys())}")
             logger.info(f"[Booker Chrono] cf_clearance: {'oui' if cf_clearance else 'non'}")
             await browser.close()
 
@@ -90,9 +93,9 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             "Referer": f"https://www.chronogolf.ca/club/{slug}",
             "X-Requested-With": "XMLHttpRequest",
         }
-        cookies = {"cf_clearance": cf_clearance}
-        if chronogolf_session:
-            cookies["_chronogolf_session"] = chronogolf_session
+        # Utiliser TOUS les cookies Playwright (inclus _cf_bm)
+        cookies = {**cookie_dict_pw}
+        logger.info(f"[Booker Chrono] Cookies pour httpx: {list(cookies.keys())}")
 
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers, cookies=cookies) as client:
             login_resp = await client.post(
