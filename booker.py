@@ -137,16 +137,29 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 return {"succes": False, "message": f"Le départ de {heure} n'est plus disponible.", "url_fallback": url_base}
 
             # ── 4. POST freeze pour générer teetime_freeze cookie ─────────────
-            freeze_url = f"https://www.chronogolf.ca/fr/private_api/teetimes/{teetime_id}/freeze"
-            freeze_resp = await client.post(freeze_url, content=b"{}", headers={**headers, "Content-Length": "2"})
-            logger.info(f"[Booker Chrono] Freeze: {freeze_resp.status_code}")
+            # Essayer plusieurs URLs de freeze
+            freeze_urls = [
+                f"https://www.chronogolf.ca/fr/private_api/teetimes/{teetime_id}/freeze",
+                f"https://www.chronogolf.ca/private_api/teetimes/{teetime_id}/freeze",
+                f"https://www.chronogolf.ca/marketplace/teetimes/{teetime_id}/freeze",
+            ]
+            freeze_ok = False
+            for freeze_url in freeze_urls:
+                freeze_resp = await client.post(
+                    freeze_url, content=b"{}",
+                    headers={**headers, "Content-Length": "2"},
+                    follow_redirects=False,
+                )
+                logger.info(f"[Booker Chrono] Freeze {freeze_url.split('chronogolf.ca')[1]}: {freeze_resp.status_code}")
+                if freeze_resp.status_code in [200, 201]:
+                    freeze_ok = True
+                    break
 
             teetime_freeze = client.cookies.get("teetime_freeze", "")
-            logger.info(f"[Booker Chrono] Cookies apres freeze: {list(client.cookies.keys())}")
             logger.info(f"[Booker Chrono] teetime_freeze: {'oui' if teetime_freeze else 'non'}")
 
-            if freeze_resp.status_code not in [200, 201]:
-                logger.warning(f"[Booker Chrono] Freeze échoué: {freeze_resp.text[:100]}")
+            if not freeze_ok:
+                logger.warning(f"[Booker Chrono] Freeze échoué sur toutes les URLs")
 
             # ── 5. POST reservation ───────────────────────────────────────────
             rounds = [
