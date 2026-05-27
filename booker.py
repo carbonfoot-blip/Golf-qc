@@ -101,16 +101,35 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             logger.info(f"[Booker Chrono] Login OK: {page.url}")
 
-            # ── 2. Page du club via navigation Angular (pas goto) ────────────
-            # Utiliser goto mais attendre que Angular initialise la session
-            await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000)
-            
-            # Vérifier si connecté sur la page du club
+            # ── 2. Naviguer vers le club via Angular ──────────────────────────
+            # Essayer d'abord via le router Angular pour garder la session
+            nav_result = await page.evaluate(f"""
+                (() => {{
+                    try {{
+                        var inj = angular.element(document.body).injector();
+                        inj.get('$location').path('/club/{slug}');
+                        inj.get('$rootScope').$apply();
+                        return 'angular-nav';
+                    }} catch(e) {{
+                        return 'fallback: ' + e.message;
+                    }}
+                }})()
+            """)
+            logger.info(f"[Booker Chrono] Navigation: {nav_result}")
+            await page.wait_for_timeout(4000)
+
+            # Si Angular nav a échoué, utiliser goto
+            if "fallback" in str(nav_result) or url_base not in page.url:
+                await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
+                await page.wait_for_timeout(5000)
+
+            # Vérifier si connecté
             connected = await page.evaluate("""
-                document.body.innerText.includes('Déconnexion') ||
-                document.body.innerText.includes('Mon compte') ||
-                document.body.innerText.includes('Felix')
+                (() => {
+                    return document.body.innerText.includes('Déconnexion') ||
+                           document.body.innerText.includes('Mon compte') ||
+                           document.body.innerText.includes('Felix');
+                })()
             """)
             logger.info(f"[Booker Chrono] Club: {page.url} — connecté: {connected} — {len(await page.content())} chars")
 
@@ -120,8 +139,10 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             # Chercher le calendrier avec plusieurs sélecteurs
             cal_html = await page.evaluate("""
-                var cal = document.querySelector('.datepicker, .calendar, [class*="datepick"], [class*="calendar"]');
-                return cal ? cal.outerHTML.substring(0, 500) : 'calendrier non trouvé';
+                (() => {
+                    var cal = document.querySelector('.datepicker, .calendar, [class*="datepick"], [class*="calendar"]');
+                    return cal ? cal.outerHTML.substring(0, 500) : 'calendrier non trouve';
+                })()
             """)
             logger.info(f"[Booker Chrono] Calendrier HTML: {cal_html[:200]}")
 
