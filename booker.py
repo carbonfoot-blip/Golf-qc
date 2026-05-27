@@ -154,44 +154,38 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
                 await browser2.close()
             logger.info(f"[Booker GGG] confirm_url direct n'a pas fonctionné — recherche httpx")
 
-        # ── Étape 2b : Recherche httpx avec session ANONYME (comme le scraper) ─
-        # GGG retourne les résultats AJAX différemment selon la session
-        # Session anonyme = même comportement que le scraper qui fonctionne
+        # ── Étape 2b : Recherche httpx EXACTEMENT comme le scraper ────────────
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
             "Referer": teetimes_url,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "fr-CA,fr;q=0.9",
+            "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.8",
             "Origin": "https://secure.gggolf.ca",
         }
 
+        # 4 payloads comme le scraper
+        payloads = [
+            {"date": date, "hour": heure_h,     "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+            {"date": date, "hour": heure_h_pad, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+            {"date": date, "hour": heure_h,     "minute": "00", "nb_players": str(nb_joueurs), "search": "Chercher les départs"},
+            {"date": date, "hour": "0",          "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+        ]
+
         search_html = ""
-        # Toujours utiliser session anonyme pour la recherche (comme le scraper)
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers) as client:
-            # GET d'abord pour obtenir les cookies de session anonyme
-            await client.get(teetimes_url)
-            for h_val in [heure_h, heure_h_pad]:
-                payload = {
-                    "date": date, "hour": h_val, "minute": "00",
-                    "nbplayers": str(nb_joueurs), "search": "Chercher les départs"
-                }
-                resp = await client.post(teetimes_url, data=payload)
-                logger.info(f"[Booker GGG] httpx POST {resp.status_code}: {len(resp.text)} chars (hour={h_val})")
-                if resp.status_code == 200 and len(resp.text) > 15000:
-                    search_html = resp.text
-                    logger.info(f"[Booker GGG] HTML obtenu (session anonyme)")
-                    # Log HTML autour des heures
-                    idx06 = resp.text.find('06:')
-                    idx_ag = resp.text.find('autogrid')
-                    logger.info(f"[Booker GGG] '06:' a pos {idx06}, 'autogrid' a pos {idx_ag}")
-                    if idx_ag > 0:
-                        logger.info(f"[Booker GGG] HTML autour autogrid: {resp.text[idx_ag:idx_ag+300]}")
-                    elif idx06 > 0:
-                        logger.info(f"[Booker GGG] HTML autour 06:: {resp.text[max(0,idx06-100):idx06+200]}")
-                    else:
-                        logger.info(f"[Booker GGG] HTML[8000:9500]: {resp.text[8000:9500]}")
-                    break
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            await client.get(teetimes_url, headers=headers)
+            for payload in payloads:
+                resp = await client.post(teetimes_url, data=payload, headers=headers)
+                logger.info(f"[Booker GGG] httpx POST {resp.status_code}: {len(resp.text)} chars (hour={payload['hour']})")
+                if resp.status_code == 200 and len(resp.text) > 5000:
+                    results_test = _trouver_confirm_url_ggg(resp.text, heure, slug)
+                    if results_test:
+                        search_html = resp.text
+                        logger.info(f"[Booker GGG] HTML avec resultats (hour={payload['hour']})")
+                        break
+                    elif len(resp.text) > 15000:
+                        search_html = resp.text  # Garder comme fallback
 
         # ── Étape 3 : Parser confirm_url depuis le HTML ──────
         confirm_url_fresh = _trouver_confirm_url_ggg(search_html, heure, slug)
