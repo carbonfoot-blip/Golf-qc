@@ -154,7 +154,9 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
                 await browser2.close()
             logger.info(f"[Booker GGG] confirm_url direct n'a pas fonctionné — recherche httpx")
 
-        # ── Étape 2b : Recherche httpx avec cookies login ────
+        # ── Étape 2b : Recherche httpx avec session ANONYME (comme le scraper) ─
+        # GGG retourne les résultats AJAX différemment selon la session
+        # Session anonyme = même comportement que le scraper qui fonctionne
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
@@ -165,10 +167,10 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
         }
 
         search_html = ""
-        async with httpx.AsyncClient(
-            timeout=HTTP_TIMEOUT, follow_redirects=True,
-            cookies=cookie_dict, headers=headers
-        ) as client:
+        # Toujours utiliser session anonyme pour la recherche (comme le scraper)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers) as client:
+            # GET d'abord pour obtenir les cookies de session anonyme
+            await client.get(teetimes_url)
             for h_val in [heure_h, heure_h_pad]:
                 payload = {
                     "date": date, "hour": h_val, "minute": "00",
@@ -178,24 +180,8 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
                 logger.info(f"[Booker GGG] httpx POST {resp.status_code}: {len(resp.text)} chars (hour={h_val})")
                 if resp.status_code == 200 and len(resp.text) > 15000:
                     search_html = resp.text
-                    logger.info(f"[Booker GGG] HTML riche obtenu")
+                    logger.info(f"[Booker GGG] HTML obtenu (session anonyme)")
                     break
-
-        if not search_html:
-            # Fallback: essayer sans cookies (session anonyme comme le scraper)
-            logger.info(f"[Booker GGG] Fallback sans cookies de login")
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers) as client:
-                await client.get(teetimes_url)
-                for h_val in [heure_h, heure_h_pad]:
-                    payload = {
-                        "date": date, "hour": h_val, "minute": "00",
-                        "nbplayers": str(nb_joueurs), "search": "Chercher les départs"
-                    }
-                    resp = await client.post(teetimes_url, data=payload)
-                    logger.info(f"[Booker GGG] Fallback POST {resp.status_code}: {len(resp.text)} chars")
-                    if resp.status_code == 200 and len(resp.text) > 15000:
-                        search_html = resp.text
-                        break
 
         # ── Étape 3 : Parser confirm_url depuis le HTML ──────
         confirm_url_fresh = _trouver_confirm_url_ggg(search_html, heure, slug)
