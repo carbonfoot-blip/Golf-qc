@@ -30,3 +30,15 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+booker_v*.py 
+index_v*.html 
+alerts_v*.html 
+main_v*.py 
+scheduler_v*.py 
+database_v*.py 
+notifier_v*.py 
+scraper_v*.py 
+courses*.json 
+chrono_*.py 
+chrono_*.html 
+*.db 
