@@ -337,20 +337,41 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 }})()
             """)
             logger.info(f"[Booker Chrono] Players: {players_done}")
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(2000)
 
-            # Continuer joueurs
+            # Chercher Continuer joueurs avec plus de sélecteurs
             continuer2 = await page.query_selector(
                 "#panel-players-body button:has-text('Continue'), "
                 "#panel-players-body button:has-text('Continuer'), "
-                "button:has-text('Continuer'), button:has-text('Continue')"
+                "#panel-players-body button[type='submit'], "
+                "button:has-text('Continue'), button:has-text('Continuer')"
             )
+            if not continuer2:
+                # Chercher via evaluate
+                continuer2_el = await page.evaluate("""
+                    (() => {
+                        var btns = document.querySelectorAll('button');
+                        for (var b of btns) {
+                            var t = b.textContent.trim();
+                            if ((t === 'Continue' || t === 'Continuer') && !b.disabled) return b.className;
+                        }
+                        return null;
+                    })()
+                """)
+                logger.info(f"[Booker Chrono] Continuer class: {continuer2_el}")
+
             if continuer2:
+                logger.info(f"[Booker Chrono] Continuer joueurs trouvé")
                 await continuer2.click()
                 await page.wait_for_timeout(5000)
                 logger.info(f"[Booker Chrono] Continuer joueurs cliqué")
             else:
-                logger.warning(f"[Booker Chrono] Continuer joueurs: NON TROUVE")
+                # Essayer de cliquer le step teetime directement
+                teetime_btn = await page.query_selector("[aria-controls='panel-teetime-body']")
+                if teetime_btn:
+                    await teetime_btn.click()
+                    await page.wait_for_timeout(3000)
+                    logger.info(f"[Booker Chrono] Teetime step ouvert directement")
 
             # Logger ce qu'on voit sur la page
             page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
