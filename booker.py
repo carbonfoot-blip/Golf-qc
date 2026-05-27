@@ -160,21 +160,26 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            # Logger l'état initial du widget
-            widget_state = await page.evaluate("""
-                (() => {
-                    var w = document.querySelector('.booking-widget-container');
-                    if (!w) return 'widget non trouve';
-                    var btns = w.querySelectorAll('button');
-                    var links = w.querySelectorAll('a, [ng-click]');
-                    return JSON.stringify({
-                        html: w.innerHTML.substring(0, 600),
-                        btns: Array.from(btns).map(b => b.textContent.trim().substring(0,30)),
-                        links: Array.from(links).slice(0,5).map(l => l.textContent.trim().substring(0,30) + '|' + (l.getAttribute('ng-click')||''))
-                    });
-                })()
+            # Widget trouvé — piloter via Angular scope directement
+            widget_driven = await page.evaluate(f"""
+                (async function() {{
+                    try {{
+                        // Trouver le scope du widget Angular
+                        var widgetEl = document.querySelector('[club-id], .widget.ng-isolate-scope');
+                        if (!widgetEl) return 'widget element not found';
+                        
+                        var scope = angular.element(widgetEl).isolateScope() || angular.element(widgetEl).scope();
+                        if (!scope) return 'scope not found';
+                        
+                        var vm = scope.vm || scope;
+                        var keys = Object.keys(vm).filter(k => !k.startsWith('$')).slice(0, 20);
+                        return 'scope keys: ' + keys.join(',');
+                    }} catch(e) {{
+                        return 'error: ' + e.message;
+                    }}
+                }})()
             """)
-            logger.info(f"[Booker Chrono] Widget state: {widget_state[:500]}")
+            logger.info(f"[Booker Chrono] Widget scope: {widget_driven}")
 
             # Cliquer le bon jour dans le calendrier Angular
             day_result = await page.evaluate(f"""
