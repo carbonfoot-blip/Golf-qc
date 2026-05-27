@@ -85,8 +85,8 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
     logger.info(f"[Booker GGG] Debut: {terrain['nom']} — {date} {heure} {nb_joueurs}j")
 
     try:
-        # ── Étape 1 : Recherche AVANT le login pour Keys fraîches ──────────────
-        headers_pre = {
+        # Headers communs pour toutes les requêtes GGG
+        headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
             "Referer": teetimes_url,
@@ -99,6 +99,9 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
             {"date": date, "hour": heure_h,     "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
             {"date": date, "hour": "0",          "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
         ]
+
+        # ── Étape 1 : Recherche AVANT le login pour Keys fraîches ──────────────
+        # (headers et payloads_pre déjà définis ci-dessus)
         pre_confirm_url = ""
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as pre_client:
             await pre_client.get(teetimes_url, headers=headers_pre)
