@@ -60,14 +60,29 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             page = await context.new_page()
 
-            # ── 1. Login sur .ca ──────────────────────────────────────────────
-            await page.goto("https://www.chronogolf.ca/fr", timeout=TIMEOUT, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000)
+            # ── 1. Aller sur la page du club D'ABORD, puis login ─────────────
+            await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(3000)
+            logger.info(f"[Booker Chrono] Page club initiale: {page.url}")
 
-            login_btn = await page.query_selector("a[ng-click*='openLightbox'], a[ng-click*='login'], a:has-text('Se connecter')")
-            if login_btn:
-                await login_btn.click()
+            # Cliquer Se connecter depuis la page du club
+            login_trigger = await page.query_selector(
+                "a:has-text('Se connecter'), a:has-text('Log In'), "
+                "button:has-text('Se connecter'), [ng-click*='login'], [ng-click*='session']"
+            )
+            if login_trigger:
+                await login_trigger.click()
                 await page.wait_for_timeout(2000)
+                logger.info(f"[Booker Chrono] Bouton login cliqué depuis page club")
+            else:
+                # Essayer de naviguer vers /fr pour le login puis revenir
+                logger.warning(f"[Booker Chrono] Bouton login non trouvé sur page club — via /fr")
+                await page.goto("https://www.chronogolf.ca/fr", timeout=TIMEOUT, wait_until="domcontentloaded")
+                await page.wait_for_timeout(2000)
+                login_trigger2 = await page.query_selector("a:has-text('Se connecter'), a:has-text('Log In')")
+                if login_trigger2:
+                    await login_trigger2.click()
+                    await page.wait_for_timeout(2000)
 
             try:
                 await page.wait_for_selector("input[type='email']", timeout=8000, state="visible")
@@ -101,27 +116,13 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             logger.info(f"[Booker Chrono] Login OK: {page.url}")
 
-            # ── 2. Naviguer vers le club via Angular ──────────────────────────
-            # Essayer d'abord via le router Angular pour garder la session
-            nav_result = await page.evaluate(f"""
-                (() => {{
-                    try {{
-                        var inj = angular.element(document.body).injector();
-                        inj.get('$location').path('/club/{slug}');
-                        inj.get('$rootScope').$apply();
-                        return 'angular-nav';
-                    }} catch(e) {{
-                        return 'fallback: ' + e.message;
-                    }}
-                }})()
-            """)
-            logger.info(f"[Booker Chrono] Navigation: {nav_result}")
-            await page.wait_for_timeout(4000)
-
-            # Si Angular nav a échoué, utiliser goto
-            if "fallback" in str(nav_result) or url_base not in page.url:
+            # Si on est sur /fr, naviguer vers le club
+            if "/fr" in page.url and slug not in page.url:
                 await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
                 await page.wait_for_timeout(5000)
+
+            # ── 2. Vérifier qu'on est connecté sur la page du club ────────────
+            nav_result = "direct"
 
             # Vérifier si connecté
             connected = await page.evaluate("""
