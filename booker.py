@@ -160,32 +160,64 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            # Le step date a un panel-title-btn et panel-date-body
-            # Cliquer le bouton pour s'assurer que le panel est ouvert
-            date_panel_result = await page.evaluate(f"""
+            # Le calendrier est uib-datepicker avec ng-change="confirmStep()"
+            # Cliquer directement sur la cellule du bon jour
+            click_result = await page.evaluate(f"""
                 (async function() {{
-                    // Cliquer le bouton du panel date
+                    // S'assurer que le panel date est ouvert
                     var btn = document.querySelector('[aria-controls="panel-date-body"]');
                     if (btn) btn.click();
-                    await new Promise(r => setTimeout(r, 1000));
+                    await new Promise(r => setTimeout(r, 500));
 
-                    // Chercher le body du panel date
-                    var body = document.querySelector('#panel-date-body, [id*="panel-date"]');
-                    if (body) {{
-                        // Chercher le calendrier dans le body
-                        var cal = body.querySelector('table, .datepicker, [class*="datepick"]');
-                        if (cal) return 'cal found: ' + cal.outerHTML.substring(0, 600);
-                        return 'body html: ' + body.innerHTML.substring(0, 600);
+                    // Trouver le datepicker
+                    var dp = document.querySelector('div[uib-datepicker]');
+                    if (!dp) return 'datepicker not found';
+
+                    // Chercher la cellule du bon jour ({target_day})
+                    var cells = dp.querySelectorAll('td[role="gridcell"] button, td.uib-day button');
+                    var found = null;
+                    for (var cell of cells) {{
+                        var txt = cell.querySelector('span')?.textContent?.trim() || cell.textContent.trim();
+                        if (txt === '{target_day}' && !cell.disabled && !cell.closest('td.text-muted')) {{
+                            found = cell;
+                            break;
+                        }}
+                    }}
+                    
+                    if (found) {{
+                        found.click();
+                        await new Promise(r => setTimeout(r, 1000));
+                        return 'clicked day {target_day}';
                     }}
 
-                    // Chercher par aria
-                    var allBodies = document.querySelectorAll('[class*="panel-body"], [class*="panel-collapse"]');
-                    var results = Array.from(allBodies).map(b => b.id + ':' + b.className.substring(0,30) + ':' + b.innerHTML.substring(0,100));
-                    return 'bodies: ' + results.slice(0,5).join(' | ');
+                    // Fallback: chercher toutes les cellules visibles
+                    var allCells = Array.from(cells).map(c => (c.querySelector('span')?.textContent || c.textContent).trim());
+                    return 'cells found: ' + allCells.slice(0, 15).join(',');
                 }})()
             """)
-            logger.info(f"[Booker Chrono] Panel date body: {date_panel_result[:500]}")
-            await page.wait_for_timeout(1000)
+            logger.info(f"[Booker Chrono] Clic jour: {click_result}")
+            await page.wait_for_timeout(2000)
+
+            # Vérifier si les étapes suivantes sont maintenant actives
+            steps_after = await page.evaluate("""
+                (() => {
+                    var els = document.querySelectorAll('[aria-busy]');
+                    for (var el of els) {
+                        var sc = angular.element(el).isolateScope() || angular.element(el).scope();
+                        if (sc && sc.vm && sc.vm.steps) {
+                            var s = sc.vm.steps;
+                            return JSON.stringify({
+                                date_set: s.date?.set,
+                                course_disabled: s.course?.disabled,
+                                players_disabled: s.players?.disabled,
+                                teetime_disabled: s.teetime?.disabled
+                            });
+                        }
+                    }
+                    return 'vm not found';
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Steps après clic: {steps_after}")
 
             # Cliquer le bon jour dans le calendrier Angular
             day_result = await page.evaluate(f"""
