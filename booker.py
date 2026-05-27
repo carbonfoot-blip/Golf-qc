@@ -85,7 +85,34 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
     logger.info(f"[Booker GGG] Debut: {terrain['nom']} — {date} {heure} {nb_joueurs}j")
 
     try:
-        # ── Étape 1 : Login Playwright ───────────────────────
+        # ── Étape 1 : Recherche AVANT le login pour Keys fraîches ──────────────
+        headers_pre = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": teetimes_url,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.8",
+            "Origin": "https://secure.gggolf.ca",
+        }
+        payloads_pre = [
+            {"date": date, "hour": heure_h_pad, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+            {"date": date, "hour": heure_h,     "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+            {"date": date, "hour": "0",          "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+        ]
+        pre_confirm_url = ""
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as pre_client:
+            await pre_client.get(teetimes_url, headers=headers_pre)
+            for payload in payloads_pre:
+                resp = await pre_client.post(teetimes_url, data=payload, headers=headers_pre)
+                logger.info(f"[Booker GGG] Pre-search POST: {len(resp.text)} chars (hour={payload['hour']})")
+                if resp.status_code == 200:
+                    found = _trouver_confirm_url_ggg(resp.text, heure, slug)
+                    if found:
+                        pre_confirm_url = found
+                        logger.info(f"[Booker GGG] Pre-search Keys: {pre_confirm_url}")
+                        break
+
+        # ── Étape 2 : Login Playwright ───────────────────────
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
             context = await browser.new_context(
@@ -127,7 +154,14 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
             logger.info(f"[Booker GGG] Cookies login: {list(cookie_dict.keys())}")
             await browser.close()
 
-        # ── Étape 2a : Essayer d'abord avec confirm_url direct ─
+        # ── Étape 3a : Essayer avec Keys fraîches (pré-recherche) ──────────────
+        best_confirm_url = pre_confirm_url or (confirm_url_direct if "Keys=" in (confirm_url_direct or "") else "")
+        if best_confirm_url:
+            logger.info(f"[Booker GGG] Tentative avec confirm_url: {best_confirm_url}")
+            confirm_url_direct = best_confirm_url  # Réutiliser la logique existante
+        if best_confirm_url and "Keys=" in best_confirm_url:
+            logger.info(f"[Booker GGG] Tentative avec confirm_url direct: {best_confirm_url}")
+            confirm_url_direct = best_confirm_url
         if confirm_url_direct and "Keys=" in confirm_url_direct:
             logger.info(f"[Booker GGG] Tentative avec confirm_url direct: {confirm_url_direct}")
             async with async_playwright() as pw2:
@@ -165,9 +199,10 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
         }
 
         # 4 payloads comme le scraper
+        # hour=06 (padded) en premier — c'est ce qui fonctionne pour Vallée-des-Forts
         payloads = [
-            {"date": date, "hour": heure_h,     "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
             {"date": date, "hour": heure_h_pad, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
+            {"date": date, "hour": heure_h,     "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
             {"date": date, "hour": heure_h,     "minute": "00", "nb_players": str(nb_joueurs), "search": "Chercher les départs"},
             {"date": date, "hour": "0",          "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
         ]
