@@ -113,9 +113,9 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             logger.info(f"[Booker Chrono] Apres login: {page.url}")
 
-            # Vérifier si connecté
-            content = await page.content()
-            if "Se connecter" in content and "session-lightbox" in content and "active" in content:
+            # Sur .ca, succès = URL /fr (pas de redirection vers login)
+            # Le popup peut encore être dans le DOM mais inactif
+            if "/login" in page.url.lower():
                 await browser.close()
                 return {"succes": False, "message": "Login Chronogolf échoué.", "url_fallback": url_base}
 
