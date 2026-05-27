@@ -246,84 +246,112 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             logger.info(f"[Booker Chrono] Clic date: {day_result}")
             await page.wait_for_timeout(2000)
 
-            # Logger HTML step course
-            course_html = await page.evaluate("""
-                (() => {
-                    var body = document.querySelector('#panel-course-body, [id*="course-body"]');
-                    if (body) return body.innerHTML.substring(0, 600);
-                    return 'course body not found';
-                })()
-            """)
-            logger.info(f"[Booker Chrono] Course HTML: {course_html[:400]}")
-
-            # Step 2: Trous — chercher les labels radio dans le step course
-            trous_label = await page.evaluate("""
+            # Étape 2 : Course — cliquer l'INPUT 18 trous (radio)
+            course_done = await page.evaluate("""
                 (() => {
                     var body = document.querySelector('#panel-course-body');
                     if (!body) return 'no course body';
-                    var labels = body.querySelectorAll('label, input');
-                    return Array.from(labels).slice(0,8).map(l => l.tagName + ':' + (l.textContent || l.value || '').trim().substring(0,20)).join(', ');
+                    // Cliquer le label ou input pour 18 trous
+                    var inputs = body.querySelectorAll('input');
+                    for (var inp of inputs) {
+                        if (inp.value === '18') {
+                            inp.click();
+                            return 'clicked input 18';
+                        }
+                    }
+                    var labels = body.querySelectorAll('label');
+                    for (var lbl of labels) {
+                        if (lbl.textContent.includes('18')) {
+                            lbl.click();
+                            return 'clicked label 18';
+                        }
+                    }
+                    return 'course input not found';
                 })()
             """)
-            logger.info(f"[Booker Chrono] Course labels: {trous_label}")
+            logger.info(f"[Booker Chrono] Course: {course_done}")
+            await page.wait_for_timeout(1000)
 
-            # ── 5. Popup "Combien de joueurs?" ────────────────────────────────
-            joueur_btn = await page.query_selector(f"button:has-text('{nb_joueurs}')")
-            if joueur_btn:
-                await joueur_btn.click()
-                await page.wait_for_timeout(1000)
-                logger.info(f"[Booker Chrono] {nb_joueurs} joueurs sélectionnés")
-
-            # Cliquer le bouton "Players" / "Joueurs" pour avancer
-            players_step_btn = await page.query_selector(
-                "button:has-text('Players'), button:has-text('Joueurs'), "
-                "[aria-controls='panel-players-body'] button, [class*='step-players'] button.panel-title-btn"
+            # Continuer trous si disponible
+            continuer_trous = await page.query_selector(
+                "#panel-course-body button:has-text('Continue'), "
+                "#panel-course-body button:has-text('Continuer')"
             )
-            if players_step_btn:
-                await players_step_btn.click()
-                await page.wait_for_timeout(2000)
-                logger.info(f"[Booker Chrono] Players step ouvert")
+            if continuer_trous:
+                await continuer_trous.click()
+                await page.wait_for_timeout(1000)
+                logger.info(f"[Booker Chrono] Continuer trous")
 
-            # Logger le HTML du step players
-            players_html = await page.evaluate("""
+            # Vérifier état après course
+            steps_after_course = await page.evaluate("""
                 (() => {
-                    var body = document.querySelector('#panel-players-body, [id*="players-body"]');
-                    if (body) return body.innerHTML.substring(0, 800);
-                    var all = document.querySelectorAll('[class*="step-players"], [class*="players-step"]');
-                    if (all.length) return all[0].innerHTML.substring(0, 800);
-                    return 'players body not found';
+                    var els = document.querySelectorAll('[aria-busy]');
+                    for (var el of els) {
+                        var sc = angular.element(el).isolateScope() || angular.element(el).scope();
+                        if (sc && sc.vm && sc.vm.steps) {
+                            return JSON.stringify({
+                                course_set: sc.vm.steps.course?.set,
+                                players_disabled: sc.vm.steps.players?.disabled
+                            });
+                        }
+                    }
+                    return 'vm not found';
                 })()
             """)
-            logger.info(f"[Booker Chrono] Players HTML: {players_html[:500]}")
+            logger.info(f"[Booker Chrono] Steps après course: {steps_after_course}")
 
-            # Maintenant chercher les boutons 1,2,3,4 joueurs dans le step players
-            joueur_select = await page.query_selector(f"#panel-players-body button:has-text('{nb_joueurs}'), [id*='players'] button:has-text('{nb_joueurs}')")
-            if joueur_select:
-                await joueur_select.click()
-                await page.wait_for_timeout(500)
-                logger.info(f"[Booker Chrono] {nb_joueurs} joueurs dans step players")
+            # Étape 3 : Players — ouvrir le step et cliquer le label du bon nombre
+            # D'abord ouvrir le step players
+            players_panel_btn = await page.query_selector("[aria-controls='panel-players-body']")
+            if players_panel_btn:
+                await players_panel_btn.click()
+                await page.wait_for_timeout(1500)
+                logger.info(f"[Booker Chrono] Panel players ouvert")
 
-            # Logger les boutons disponibles
-            btns_after = await page.evaluate("""
-                (() => {
-                    var widget = document.querySelector('[aria-busy]');
-                    if (!widget) return 'no widget';
-                    var btns = widget.querySelectorAll('button:not([disabled])');
-                    return Array.from(btns).slice(0,10).map(b => '"' + b.textContent.trim().substring(0,20) + '"').join(', ');
-                })()
+            # Cliquer le label radio pour le bon nombre de joueurs
+            players_done = await page.evaluate(f"""
+                (() => {{
+                    var body = document.querySelector('#panel-players-body');
+                    if (!body) return 'no players body';
+                    // Chercher inputs radio avec valeur = nb_joueurs
+                    var inputs = body.querySelectorAll('input');
+                    for (var inp of inputs) {{
+                        if (inp.value == '{nb_joueurs}') {{
+                            inp.click();
+                            return 'clicked input ' + inp.value;
+                        }}
+                    }}
+                    // Chercher labels
+                    var labels = body.querySelectorAll('label');
+                    for (var lbl of labels) {{
+                        var txt = lbl.textContent.trim();
+                        if (txt === '{nb_joueurs}') {{
+                            lbl.click();
+                            return 'clicked label ' + txt;
+                        }}
+                    }}
+                    // Logger ce qui est dispo
+                    var allLabels = Array.from(labels).map(l => l.textContent.trim().substring(0,10));
+                    var allInputs = Array.from(inputs).map(i => i.value);
+                    return 'not found. labels:' + allLabels.join(',') + ' inputs:' + allInputs.join(',');
+                }})()
             """)
-            logger.info(f"[Booker Chrono] Boutons après players: {btns_after}")
+            logger.info(f"[Booker Chrono] Players: {players_done}")
+            await page.wait_for_timeout(1000)
 
-            continuer2 = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
+            # Continuer joueurs
+            continuer2 = await page.query_selector(
+                "#panel-players-body button:has-text('Continue'), "
+                "#panel-players-body button:has-text('Continuer'), "
+                "button:has-text('Continuer'), button:has-text('Continue')"
+            )
             if continuer2:
-                is_disabled = await continuer2.get_attribute("disabled")
-                logger.info(f"[Booker Chrono] Continuer joueurs: disabled={is_disabled}")
-                await continuer2.click(force=True)
+                await continuer2.click()
                 await page.wait_for_timeout(5000)
                 logger.info(f"[Booker Chrono] Continuer joueurs cliqué")
             else:
                 logger.warning(f"[Booker Chrono] Continuer joueurs: NON TROUVE")
-            
+
             # Logger ce qu'on voit sur la page
             page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
             logger.info(f"[Booker Chrono] Page après joueurs: {page_sample[:300]}")
