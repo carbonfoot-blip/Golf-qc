@@ -152,7 +152,6 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             if booking_widget:
                 logger.info(f"[Booker Chrono] Widget booking trouvé")
             else:
-                # Cliquer sur "Réservation en ligne" ou le bouton d'accès
                 reserve_btn = await page.query_selector(
                     "a:has-text('Réservation'), button:has-text('Réserver'), "
                     ".club-profile-reservation, [class*='reservation']"
@@ -161,16 +160,21 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            # Étape 1 : Sélectionner la date
-            # Cliquer sur la date actuelle pour ouvrir le calendrier
-            date_btn = await page.query_selector(
-                "[class*='widget-step-date'], [ng-click*='date'], "
-                ".booking-date, [class*='datepicker-toggle']"
-            )
-            if date_btn:
-                await date_btn.click()
-                await page.wait_for_timeout(1000)
-                logger.info(f"[Booker Chrono] Bouton date cliqué")
+            # Logger l'état initial du widget
+            widget_state = await page.evaluate("""
+                (() => {
+                    var w = document.querySelector('.booking-widget-container');
+                    if (!w) return 'widget non trouve';
+                    var btns = w.querySelectorAll('button');
+                    var links = w.querySelectorAll('a, [ng-click]');
+                    return JSON.stringify({
+                        html: w.innerHTML.substring(0, 600),
+                        btns: Array.from(btns).map(b => b.textContent.trim().substring(0,30)),
+                        links: Array.from(links).slice(0,5).map(l => l.textContent.trim().substring(0,30) + '|' + (l.getAttribute('ng-click')||''))
+                    });
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Widget state: {widget_state[:500]}")
 
             # Cliquer le bon jour dans le calendrier Angular
             day_result = await page.evaluate(f"""
@@ -203,13 +207,13 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 "[class*='holes-18'], [ng-click*='18']"
             )
             if trous_btn:
-                await trous_btn.click()
+                await trous_btn.click(force=True)
                 await page.wait_for_timeout(500)
                 logger.info(f"[Booker Chrono] 18 trous")
 
             continuer = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
             if continuer:
-                await continuer.click()
+                await continuer.click(force=True)
                 await page.wait_for_timeout(1500)
                 logger.info(f"[Booker Chrono] Continuer (trous)")
 
