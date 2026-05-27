@@ -32,25 +32,21 @@ async def reserver_depart(terrain, confirm_url, username, password, date="", heu
 
 async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, password: str, date: str = "", heure: str = "", nb_joueurs: int = 2) -> dict:
     """
-    Flow Chronogolf 100% Playwright:
-    1. Login sur .ca via popup Angular (Turnstile passe automatiquement)
-    2. Naviguer vers la page booking du terrain
-    3. Sélectionner la date
-    4. Cliquer sur le départ voulu → génère teetime_freeze automatiquement
-    5. Cocher "J'accepte" et confirmer → POST fait par Angular
+    Flow Chronogolf 100% Playwright — suit exactement le flow utilisateur:
+    1. Login sur .ca
+    2. Page club → cliquer date dans calendrier
+    3. Popup trous → 18 trous → Continuer
+    4. Popup joueurs → nb_joueurs → Continuer
+    5. Cliquer le départ voulu
+    6. Cocher checkbox → Confirmer
     """
     slug = terrain.get("chronogolf_slug", terrain["id"])
-    club_id = terrain.get("chronogolf_club_id")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
-    booking_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
-
-    logger.info(f"[Booker Chrono] Debut Playwright pur: {terrain['nom']} — {date} {heure}")
-
     heure_norm = f"{int(heure.split(':')[0]):02d}:{heure.split(':')[1]}" if heure and ":" in heure else ""
 
-    try:
-        import json as _json
+    logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure_norm}")
 
+    try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
                 headless=True,
@@ -59,7 +55,7 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 locale="fr-CA",
-                viewport={"width": 1280, "height": 800},
+                viewport={"width": 1280, "height": 900},
             )
             await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             page = await context.new_page()
@@ -68,41 +64,29 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             await page.goto("https://www.chronogolf.ca/fr", timeout=TIMEOUT, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # Cliquer Se connecter
             login_btn = await page.query_selector("a[ng-click*='openLightbox'], a[ng-click*='login'], a:has-text('Se connecter')")
             if login_btn:
                 await login_btn.click()
                 await page.wait_for_timeout(2000)
-                logger.info(f"[Booker Chrono] Popup login ouvert")
 
-            # Attendre que les champs soient visibles
             try:
-                await page.wait_for_selector("input[type='email'], input[name='email']", timeout=10000, state="visible")
+                await page.wait_for_selector("input[type='email']", timeout=8000, state="visible")
             except Exception:
-                logger.warning(f"[Booker Chrono] Champs email non trouvés après attente")
+                pass
 
-            email_field = await page.query_selector("input[name='email'], input[id='sessionEmail'], input[type='email']")
-            pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword'], input[type='password']")
+            email_f = await page.query_selector("input[type='email'], input[name='email']")
+            pwd_f   = await page.query_selector("input[type='password'], input[name='password']")
 
-            logger.info(f"[Booker Chrono] Champs: email={'oui' if email_field else 'non'} pwd={'oui' if pwd_field else 'non'}")
-
-            if not email_field or not pwd_field:
+            if not email_f or not pwd_f:
                 await browser.close()
-                return {"succes": False, "message": "Page login Chronogolf introuvable.", "url_fallback": url_base}
+                return {"succes": False, "message": "Page login introuvable.", "url_fallback": url_base}
 
-            await email_field.click()
-            await page.wait_for_timeout(200)
-            await email_field.type(username, delay=30)
-            await page.wait_for_timeout(300)
-            await pwd_field.click()
-            await page.wait_for_timeout(200)
-            await pwd_field.type(password, delay=30)
-            await page.wait_for_timeout(500)
+            await email_f.click()
+            await email_f.type(username, delay=30)
+            await pwd_f.click()
+            await pwd_f.type(password, delay=30)
+            await pwd_f.press("Enter")
 
-            # Soumettre — utiliser Enter au lieu de cliquer le bouton
-            await pwd_field.press("Enter")
-
-            # Attendre que le popup disparaisse
             try:
                 await page.wait_for_function(
                     "!document.querySelector('.session-lightbox.ng-scope.active')",
@@ -111,155 +95,177 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             except Exception:
                 await page.wait_for_timeout(5000)
 
-            logger.info(f"[Booker Chrono] Apres login: {page.url}")
-
-            # Sur .ca, succès = URL /fr (pas de redirection vers login)
-            # Le popup peut encore être dans le DOM mais inactif
-            if "/login" in page.url.lower():
+            if "/login" in page.url:
                 await browser.close()
-                return {"succes": False, "message": "Login Chronogolf échoué.", "url_fallback": url_base}
+                return {"succes": False, "message": "Identifiants Chronogolf incorrects.", "url_fallback": url_base}
 
-            logger.info(f"[Booker Chrono] Login réussi!")
+            logger.info(f"[Booker Chrono] Login OK: {page.url}")
 
-            # ── 2. Naviguer vers la page du club (pas /booking/) ─────────────
-            club_url = f"https://www.chronogolf.ca/club/{slug}"
-            await page.goto(club_url, timeout=TIMEOUT, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000)
-            logger.info(f"[Booker Chrono] Club page: {page.url} — {len(await page.content())} chars")
+            # ── 2. Page du club ───────────────────────────────────────────────
+            await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(3000)
+            logger.info(f"[Booker Chrono] Club: {page.url}")
 
-            # ── 3. Sélectionner la date dans le calendrier ────────────────────
-            # Entrer la date dans le champ date de l'interface
+            # ── 3. Cliquer la date dans le calendrier ─────────────────────────
+            # Naviguer au bon mois si nécessaire
             date_parts = date.split('-')
-            date_fr = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}"  # dd/mm/yyyy
+            target_day = int(date_parts[2])
+            target_month = int(date_parts[1])
+            target_year = int(date_parts[0])
 
-            # Chercher le champ date
-            date_input = await page.query_selector("input[type='date'], input[ng-model*='date'], input[placeholder*='date'], input[placeholder*='Date']")
-            if date_input:
-                await date_input.fill(date)
-                await page.wait_for_timeout(1000)
-                logger.info(f"[Booker Chrono] Date remplie: {date}")
-            else:
-                # Cliquer sur la date dans le calendrier bootstrap
-                day = str(int(date_parts[2]))
-                try:
-                    # Naviguer au bon mois si nécessaire
-                    month_year = await page.query_selector(".datepicker-switch, .picker-switch")
-                    logger.info(f"[Booker Chrono] Calendrier: {'trouvé' if month_year else 'non trouvé'}")
+            # Avancer dans le calendrier si nécessaire
+            for _ in range(6):  # max 6 mois
+                month_text = await page.evaluate("""
+                    document.querySelector('.datepicker-switch, .picker-switch, [class*="month-title"]')?.textContent?.trim() || ''
+                """)
+                logger.info(f"[Booker Chrono] Mois visible: {month_text}")
 
-                    day_btn = await page.query_selector(f"td.day:not(.old):not(.new) >> text='{day}'")
-                    if not day_btn:
-                        day_btn = await page.query_selector(f"[class*='day']:not([class*='old']):not([class*='new'])")
-                    if day_btn:
-                        await day_btn.click()
-                        await page.wait_for_timeout(2000)
-                        logger.info(f"[Booker Chrono] Jour {day} cliqué dans calendrier")
-                except Exception as e:
-                    logger.warning(f"[Booker Chrono] Clic date: {e}")
-
-            await page.wait_for_timeout(2000)
-
-            # ── 4. Chercher le départ voulu ───────────────────────────────────
-            # Logger ce qui est disponible sur la page
-            page_text_sample = await page.evaluate("document.body.innerText.substring(0, 2000)")
-            logger.info(f"[Booker Chrono] Page text sample: {page_text_sample[:500]}")
-
-            # ── 4. Intercepter les requêtes POST reservation ──────────────────
-            reservation_result = {"done": False}
-
-            async def handle_response(response):
-                if "marketplace/reservations" in response.url and response.request.method == "POST":
-                    status = response.status
-                    try:
-                        body = await response.text()
-                        logger.info(f"[Booker Chrono] Intercept POST reservations: {status} — {body[:150]}")
-                        reservation_result["status"] = status
-                        reservation_result["body"] = body
-                        reservation_result["done"] = True
-                    except Exception:
-                        pass
-
-            page.on("response", handle_response)
-
-            # ── 5. Cliquer sur le départ voulu ───────────────────────────────
-            # Chercher les départs disponibles dans la page
-            await page.wait_for_timeout(2000)
-
-            # Chercher via l'API Angular dans le scope
-            teeimes_info = await page.evaluate(f"""
-                (function() {{
-                    try {{
-                        var scopes = document.querySelectorAll('[ng-repeat*="teetime"], [ng-repeat*="tee_time"]');
-                        return 'found ' + scopes.length + ' ng-repeat';
-                    }} catch(e) {{ return 'error: ' + e.message; }}
-                }})()
-            """)
-            logger.info(f"[Booker Chrono] TeeTime elements: {teeimes_info}")
-
-            # Chercher le départ par l'heure dans le DOM
-            teetime_clicked = await page.evaluate(f"""
-                (async function() {{
-                    // Attendre que les départs chargent
-                    await new Promise(r => setTimeout(r, 2000));
-
-                    // Chercher tous les éléments avec l'heure cible
-                    var heure = '{heure_norm}';
-                    var elements = Array.from(document.querySelectorAll('*'));
-                    var found = elements.filter(el =>
-                        el.children.length === 0 &&
-                        el.textContent.trim() === heure
-                    );
-                    if (found.length > 0) {{
-                        // Cliquer sur le parent cliquable
-                        var el = found[0];
-                        while (el && !el.onclick && el.tagName !== 'BUTTON' && el.tagName !== 'A' && !el.getAttribute('ng-click')) {{
-                            el = el.parentElement;
+                # Cliquer le bon jour
+                day_clicked = await page.evaluate(f"""
+                    (function() {{
+                        var cells = document.querySelectorAll('td.day:not(.old):not(.new), .datepicker-days td:not(.old):not(.new)');
+                        for (var c of cells) {{
+                            if (c.textContent.trim() === '{target_day}') {{
+                                c.click();
+                                return true;
+                            }}
                         }}
-                        if (el) {{ el.click(); return 'clicked: ' + el.tagName; }}
-                        found[0].click();
-                        return 'clicked fallback';
+                        return false;
+                    }})()
+                """)
+                if day_clicked:
+                    logger.info(f"[Booker Chrono] Jour {target_day} cliqué")
+                    break
+
+                # Aller au mois suivant
+                next_btn = await page.query_selector(".next, [class*='next-month'], button[aria-label*='next']")
+                if next_btn:
+                    await next_btn.click()
+                    await page.wait_for_timeout(500)
+
+            await page.wait_for_timeout(2000)
+
+            # ── 4. Popup "Combien de trous?" → 18 trous ───────────────────────
+            trous_btn = await page.query_selector("button:has-text('18 trous'), [class*='holes'] button:has-text('18')")
+            if trous_btn:
+                await trous_btn.click()
+                await page.wait_for_timeout(500)
+                logger.info(f"[Booker Chrono] 18 trous sélectionnés")
+
+            continuer = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
+            if continuer:
+                await continuer.click()
+                await page.wait_for_timeout(1500)
+                logger.info(f"[Booker Chrono] Continuer (trous)")
+
+            # ── 5. Popup "Combien de joueurs?" ────────────────────────────────
+            joueur_btn = await page.query_selector(f"button:has-text('{nb_joueurs}')")
+            if joueur_btn:
+                await joueur_btn.click()
+                await page.wait_for_timeout(500)
+                logger.info(f"[Booker Chrono] {nb_joueurs} joueurs sélectionnés")
+
+            continuer2 = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
+            if continuer2:
+                await continuer2.click()
+                await page.wait_for_timeout(3000)
+                logger.info(f"[Booker Chrono] Continuer (joueurs)")
+
+            # ── 6. Cliquer sur le départ voulu ───────────────────────────────
+            logger.info(f"[Booker Chrono] Cherche départ {heure_norm}")
+
+            # Attendre que les départs chargent
+            await page.wait_for_timeout(2000)
+
+            depart_clicked = await page.evaluate(f"""
+                (function() {{
+                    var heure = '{heure_norm}';
+                    // Chercher tous les éléments texte qui correspondent à l'heure
+                    var all = document.querySelectorAll('*');
+                    for (var el of all) {{
+                        if (el.children.length === 0 && el.textContent.trim() === heure) {{
+                            // Trouver l'élément cliquable parent
+                            var parent = el;
+                            for (var i = 0; i < 5; i++) {{
+                                parent = parent.parentElement;
+                                if (!parent) break;
+                                if (parent.tagName === 'BUTTON' || parent.tagName === 'A' ||
+                                    parent.getAttribute('ng-click') || parent.getAttribute('onclick') ||
+                                    window.getComputedStyle(parent).cursor === 'pointer') {{
+                                    parent.click();
+                                    return 'clicked ' + parent.tagName + ': ' + heure;
+                                }}
+                            }}
+                            el.click();
+                            return 'clicked element: ' + heure;
+                        }}
                     }}
-                    return 'not found - heures: ' + elements.filter(e => e.textContent.match(/^\d{{2}}:\d{{2}}$/)).slice(0,5).map(e=>e.textContent.trim()).join(',');
+                    // Chercher aussi avec format H:MM
+                    var heures_trouvees = [];
+                    for (var el of all) {{
+                        if (el.children.length === 0 && /^\d{{1,2}}:\d{{2}}$/.test(el.textContent.trim())) {{
+                            heures_trouvees.push(el.textContent.trim());
+                        }}
+                    }}
+                    return 'not found. Heures: ' + heures_trouvees.slice(0,8).join(',');
                 }})()
             """)
-            logger.info(f"[Booker Chrono] Clic départ: {teetime_clicked}")
+            logger.info(f"[Booker Chrono] Départ: {depart_clicked}")
+
+            if "not found" in str(depart_clicked):
+                await browser.close()
+                return {"succes": False, "message": f"Départ {heure} non trouvé.", "url_fallback": url_base}
 
             await page.wait_for_timeout(3000)
 
-            # Si le départ a été cliqué, chercher la checkbox et confirmer
-            page_content = await page.content()
-            logger.info(f"[Booker Chrono] Après clic: {page.url} — {len(page_content)} chars")
+            # ── 7. Page de confirmation ───────────────────────────────────────
+            logger.info(f"[Booker Chrono] Après clic départ: {page.url}")
 
-            # Cocher la checkbox "J'accepte"
-            checkbox = await page.query_selector("input[type='checkbox'], input[ng-model*='accept'], input[ng-model*='terms']")
+            # Intercepter le POST reservation
+            reservation_success = [False]
+
+            async def on_response(resp):
+                if "marketplace/reservations" in resp.url and resp.request.method == "POST":
+                    try:
+                        body = await resp.text()
+                        status = resp.status
+                        logger.info(f"[Booker Chrono] POST reservations: {status} — {body[:150]}")
+                        if status in [200, 201] and '"id"' in body:
+                            reservation_success[0] = True
+                    except Exception:
+                        pass
+
+            page.on("response", on_response)
+
+            # Cocher la checkbox
+            await page.wait_for_timeout(2000)
+            checkbox = await page.query_selector("input[type='checkbox']")
             if checkbox:
                 await checkbox.click()
                 await page.wait_for_timeout(500)
                 logger.info(f"[Booker Chrono] Checkbox cochée")
+            else:
+                logger.warning(f"[Booker Chrono] Checkbox non trouvée")
 
-            # Cliquer "Confirmer la réservation"
-            confirm_btn = await page.query_selector(
-                "button:has-text('Confirmer'), button:has-text('Confirm'), "
-                "button[ng-click*='confirm'], button[ng-click*='book'], "
-                "button[ng-disabled*='accept']"
+            # Cliquer Confirmer
+            confirm = await page.query_selector(
+                "button:has-text('Confirmer la réservation'), "
+                "button:has-text('Confirm'), "
+                "button[type='submit']:not([disabled])"
             )
-            if confirm_btn:
-                await confirm_btn.click()
-                logger.info(f"[Booker Chrono] Bouton confirmer cliqué")
+            if confirm:
+                await confirm.click()
+                logger.info(f"[Booker Chrono] Confirmer cliqué")
                 await page.wait_for_timeout(5000)
             else:
-                logger.warning(f"[Booker Chrono] Bouton confirmer non trouvé")
+                logger.warning(f"[Booker Chrono] Bouton Confirmer non trouvé")
 
             await browser.close()
 
-            # Vérifier le résultat
-            if reservation_result.get("done"):
-                status = reservation_result.get("status", 0)
-                body = reservation_result.get("body", "")
-                if status in [200, 201] and '"id"' in body:
-                    return {"succes": True, "message": "Réservation Chronogolf confirmée! Vérifiez votre courriel."}
-                return {"succes": False, "message": f"Erreur Chronogolf ({status}).", "url_fallback": url_base}
+            if reservation_success[0]:
+                return {"succes": True, "message": "Réservation Chronogolf confirmée! Vérifiez votre courriel."}
 
-            return {"succes": False, "message": "Réservation non complétée. Réessayez.", "url_fallback": url_base}
+            return {"succes": False, "message": "Réservation non complétée. Réessayez ou réservez manuellement.", "url_fallback": url_base}
 
     except Exception as e:
         logger.error(f"[Booker Chrono] Erreur: {e}")
