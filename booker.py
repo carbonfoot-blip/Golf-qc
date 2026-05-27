@@ -412,8 +412,72 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     return 'vm not found';
                 })()
             """)
-            logger.info(f"[Booker Chrono] Force teetime: {teetime_open_result}")
-            await page.wait_for_timeout(3000)
+            # Intercepter les requêtes réseau
+            api_calls = []
+
+            async def on_request(request):
+                if 'teetimes' in request.url or 'teetime' in request.url:
+                    api_calls.append(f"REQ: {request.method} {request.url[:100]}")
+
+            async def on_response(resp):
+                if 'teetimes' in resp.url or 'teetime' in resp.url:
+                    try:
+                        body = await resp.text()
+                        api_calls.append(f"RESP {resp.status}: {resp.url[:80]} — {body[:100]}")
+                    except:
+                        api_calls.append(f"RESP {resp.status}: {resp.url[:80]}")
+
+            page.on("request", on_request)
+            page.on("response", on_response)
+
+            # Forcer une re-recherche en cliquant le bouton teetime
+            teetime_panel_btn = await page.query_selector("[aria-controls='panel-teetime-body']")
+            if teetime_panel_btn:
+                await teetime_panel_btn.click()
+                await page.wait_for_timeout(500)
+
+            # Aussi essayer via vm
+            await page.evaluate("""
+                (() => {
+                    var els = document.querySelectorAll('[aria-busy]');
+                    for (var el of els) {
+                        var sc = angular.element(el).isolateScope() || angular.element(el).scope();
+                        if (sc && sc.vm) {
+                            sc.$apply(function() {
+                                sc.vm.steps.teetime.open = true;
+                                if (sc.vm.getReservationParams) {
+                                    var params = sc.vm.getReservationParams();
+                                }
+                            });
+                            break;
+                        }
+                    }
+                })()
+            """)
+            await page.wait_for_timeout(5000)
+
+            logger.info(f"[Booker Chrono] API calls: {api_calls}")
+
+            # Logger l'état vm complet
+            vm_state = await page.evaluate("""
+                (() => {
+                    var els = document.querySelectorAll('[aria-busy]');
+                    for (var el of els) {
+                        var sc = angular.element(el).isolateScope() || angular.element(el).scope();
+                        if (sc && sc.vm) {
+                            var vm = sc.vm;
+                            var params = vm.getReservationParams ? JSON.stringify(vm.getReservationParams()).substring(0,200) : 'no fn';
+                            return JSON.stringify({
+                                teetime_disabled: vm.steps.teetime?.disabled,
+                                teetime_open: vm.steps.teetime?.open,
+                                params: params
+                            });
+                        }
+                    }
+                    return 'vm not found';
+                })()
+            """)
+            logger.info(f"[Booker Chrono] VM state: {vm_state}")
 
             # Logger ce qu'on voit sur la page
             page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
