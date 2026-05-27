@@ -103,8 +103,8 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             # ── 2. Page du club ───────────────────────────────────────────────
             await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
-            logger.info(f"[Booker Chrono] Club: {page.url}")
+            await page.wait_for_timeout(4000)
+            logger.info(f"[Booker Chrono] Club: {page.url} — {len(await page.content())} chars")
 
             # ── 3. Cliquer la date dans le calendrier ─────────────────────────
             # Naviguer au bon mois si nécessaire
@@ -168,8 +168,12 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             continuer2 = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
             if continuer2:
                 await continuer2.click()
-                await page.wait_for_timeout(3000)
-                logger.info(f"[Booker Chrono] Continuer (joueurs)")
+                await page.wait_for_timeout(5000)  # Attendre que les départs chargent
+                logger.info(f"[Booker Chrono] Continuer (joueurs) — URL: {page.url}")
+            
+            # Logger ce qu'on voit sur la page
+            page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
+            logger.info(f"[Booker Chrono] Page après joueurs: {page_sample[:300]}")
 
             # ── 6. Cliquer sur le départ voulu ───────────────────────────────
             logger.info(f"[Booker Chrono] Cherche départ {heure_norm}")
