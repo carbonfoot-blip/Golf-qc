@@ -36,7 +36,7 @@ async def reserver_depart(terrain, confirm_url, username, password, date="", heu
     return {"succes": False, "message": "Systeme non supporte."}
 
 
-async def _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, slug, cookies=None):
+async def _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, slug, heure_complete, cookies=None):
     """Recherche les départs GGG et retourne la confirm_url si trouvée."""
     payloads = [
         {"date": date, "hour": heure_h_pad, "minute": "00", "nbplayers": str(nb_joueurs), "search": "Chercher les départs"},
@@ -53,7 +53,7 @@ async def _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, 
             tag = "auth" if cookies else "anon"
             logger.info(f"[Booker GGG] POST {tag}: {len(resp.text)} chars (hour={payload['hour']})")
             if resp.status_code == 200:
-                found = _trouver_confirm_url_ggg(resp.text, heure, slug)
+                found = _trouver_confirm_url_ggg(resp.text, heure_complete, slug)
                 if found:
                     return found
     return ""
@@ -70,7 +70,7 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
 
     try:
         # ── 1. Pré-recherche anonyme pour vérifier disponibilité ─────────────
-        pre_url = await _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, slug)
+        pre_url = await _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, slug, heure)
         if pre_url:
             logger.info(f"[Booker GGG] Pre-recherche: {pre_url}")
         else:
@@ -115,7 +115,7 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
             await browser.close()
 
         # ── 3. Recherche avec cookies login pour Keys valides ─────────────────
-        auth_url = await _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, slug, cookie_dict)
+        auth_url = await _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, slug, heure, cookie_dict)
         if auth_url:
             logger.info(f"[Booker GGG] Auth Keys: {auth_url}")
             confirm_url_final = auth_url
