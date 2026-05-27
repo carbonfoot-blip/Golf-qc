@@ -266,16 +266,27 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             joueur_btn = await page.query_selector(f"button:has-text('{nb_joueurs}')")
             if joueur_btn:
                 await joueur_btn.click()
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(1000)
                 logger.info(f"[Booker Chrono] {nb_joueurs} joueurs sélectionnés")
+
+            # Logger les boutons disponibles
+            btns_after = await page.evaluate("""
+                (() => {
+                    var widget = document.querySelector('[aria-busy]');
+                    if (!widget) return 'no widget';
+                    var btns = widget.querySelectorAll('button');
+                    return Array.from(btns).map(b => '"' + b.textContent.trim().substring(0,15) + '"[dis=' + b.disabled + ']').join(', ');
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Boutons widget: {btns_after}")
 
             continuer2 = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
             if continuer2:
                 is_disabled = await continuer2.get_attribute("disabled")
-                logger.info(f"[Booker Chrono] Continuer joueurs: trouve, disabled={is_disabled}")
+                logger.info(f"[Booker Chrono] Continuer joueurs: disabled={is_disabled}")
                 await continuer2.click(force=True)
                 await page.wait_for_timeout(5000)
-                logger.info(f"[Booker Chrono] Continuer (joueurs) — URL: {page.url}")
+                logger.info(f"[Booker Chrono] Continuer joueurs cliqué")
             else:
                 logger.warning(f"[Booker Chrono] Continuer joueurs: NON TROUVE")
             
