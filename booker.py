@@ -138,8 +138,8 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             freeze_resp = await client.post(freeze_url, content=b"{}", headers={**headers, "Content-Length": "2"})
             logger.info(f"[Booker Chrono] Freeze: {freeze_resp.status_code}")
 
-            # Vérifier que le cookie teetime_freeze est présent
             teetime_freeze = client.cookies.get("teetime_freeze", "")
+            logger.info(f"[Booker Chrono] Cookies apres freeze: {list(client.cookies.keys())}")
             logger.info(f"[Booker Chrono] teetime_freeze: {'oui' if teetime_freeze else 'non'}")
 
             if freeze_resp.status_code not in [200, 201]:
