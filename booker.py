@@ -143,29 +143,75 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             """)
             logger.info(f"[Booker Chrono] Club: {page.url} — connecté: {connected} — {len(await page.content())} chars")
 
-            # ── 3. Trouver et interagir avec le panneau de réservation ───────
+            # ── 3. Interagir avec le widget de booking ────────────────────────
             date_parts = date.split('-')
             target_day = int(date_parts[2])
 
-            # Logger le panneau de réservation
-            panel_info = await page.evaluate("""
-                (() => {
-                    var results = [];
-                    var all = document.querySelectorAll('[class*="booking"], [class*="reservation"], [class*="teetime"], [ng-controller*="Club"], [ng-controller*="Booking"]');
-                    for (var el of all) {
-                        results.push(el.tagName + '.' + el.className.substring(0,50));
-                    }
-                    // Chercher par texte
-                    var body = document.body.innerHTML;
-                    var hasReservation = body.includes('Réservation en ligne');
-                    var hasCalendar = body.includes('juin 2026') || body.includes('mai 2026');
-                    var hasTrous = body.includes('18 trous') || body.includes('trous');
-                    return JSON.stringify({elements: results.slice(0,10), hasReservation, hasCalendar, hasTrous});
-                })()
-            """)
-            logger.info(f"[Booker Chrono] Panneau: {panel_info}")
+            # Ouvrir le widget de booking si nécessaire
+            booking_widget = await page.query_selector(".booking-widget-container, .club-card-booking")
+            if booking_widget:
+                logger.info(f"[Booker Chrono] Widget booking trouvé")
+            else:
+                # Cliquer sur "Réservation en ligne" ou le bouton d'accès
+                reserve_btn = await page.query_selector(
+                    "a:has-text('Réservation'), button:has-text('Réserver'), "
+                    ".club-profile-reservation, [class*='reservation']"
+                )
+                if reserve_btn:
+                    await reserve_btn.click()
+                    await page.wait_for_timeout(2000)
 
+            # Étape 1 : Sélectionner la date
+            # Cliquer sur la date actuelle pour ouvrir le calendrier
+            date_btn = await page.query_selector(
+                "[class*='widget-step-date'], [ng-click*='date'], "
+                ".booking-date, [class*='datepicker-toggle']"
+            )
+            if date_btn:
+                await date_btn.click()
+                await page.wait_for_timeout(1000)
+                logger.info(f"[Booker Chrono] Bouton date cliqué")
+
+            # Cliquer le bon jour dans le calendrier Angular
+            day_result = await page.evaluate(f"""
+                (() => {{
+                    // Chercher dans widget-step-teetime ou booking-widget
+                    var container = document.querySelector('.booking-widget-container, .club-profile-reservation');
+                    if (!container) container = document;
+                    var cells = container.querySelectorAll('td.day:not(.old):not(.new), td[class*="day"]:not([class*="old"]):not([class*="new"]), .datepicker td');
+                    for (var c of cells) {{
+                        if (c.textContent.trim() === '{target_day}' && !c.classList.contains('disabled')) {{
+                            c.click();
+                            return 'clicked day ' + {target_day};
+                        }}
+                    }}
+                    // Essayer aussi via scope Angular
+                    var scope = angular.element(document.querySelector('.booking-widget-container'))?.scope();
+                    if (scope) {{
+                        var keys = Object.keys(scope).filter(k => k.includes('date') || k.includes('Date'));
+                        return 'scope keys: ' + keys.join(',');
+                    }}
+                    return 'day not found in calendar';
+                }})()
+            """)
+            logger.info(f"[Booker Chrono] Clic date: {day_result}")
             await page.wait_for_timeout(2000)
+
+            # Étape 2 : 18 trous
+            trous_btn = await page.query_selector(
+                "button:has-text('18 trous'), button:has-text('18'), "
+                "[class*='holes-18'], [ng-click*='18']"
+            )
+            if trous_btn:
+                await trous_btn.click()
+                await page.wait_for_timeout(500)
+                logger.info(f"[Booker Chrono] 18 trous")
+
+            continuer = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
+            if continuer:
+                await continuer.click()
+                await page.wait_for_timeout(1500)
+                logger.info(f"[Booker Chrono] Continuer (trous)")
 
             # ── 5. Popup "Combien de joueurs?" ────────────────────────────────
             joueur_btn = await page.query_selector(f"button:has-text('{nb_joueurs}')")
