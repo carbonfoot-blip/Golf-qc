@@ -365,13 +365,55 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 await continuer2.click()
                 await page.wait_for_timeout(5000)
                 logger.info(f"[Booker Chrono] Continuer joueurs cliqué")
-            else:
-                # Essayer de cliquer le step teetime directement
-                teetime_btn = await page.query_selector("[aria-controls='panel-teetime-body']")
-                if teetime_btn:
-                    await teetime_btn.click()
-                    await page.wait_for_timeout(3000)
-                    logger.info(f"[Booker Chrono] Teetime step ouvert directement")
+            await page.wait_for_timeout(2000)
+
+            # Vérifier état steps après joueurs
+            steps_after_players = await page.evaluate("""
+                (() => {
+                    var els = document.querySelectorAll('[aria-busy]');
+                    for (var el of els) {
+                        var sc = angular.element(el).isolateScope() || angular.element(el).scope();
+                        if (sc && sc.vm && sc.vm.steps) {
+                            var s = sc.vm.steps;
+                            return JSON.stringify({
+                                players_set: s.players?.set,
+                                teetime_disabled: s.teetime?.disabled,
+                                teetime_open: s.teetime?.open,
+                                areStepsStarted: sc.vm.areStepsStarted ? sc.vm.areStepsStarted() : 'no fn'
+                            });
+                        }
+                    }
+                    return 'vm not found';
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Steps après players: {steps_after_players}")
+
+            # Ouvrir le step teetime manuellement si disabled
+            teetime_open_result = await page.evaluate("""
+                (() => {
+                    var els = document.querySelectorAll('[aria-busy]');
+                    for (var el of els) {
+                        var sc = angular.element(el).isolateScope() || angular.element(el).scope();
+                        if (sc && sc.vm && sc.vm.steps) {
+                            var vm = sc.vm;
+                            try {
+                                // Forcer l'ouverture du step teetime
+                                sc.$apply(function() {
+                                    vm.steps.teetime.open = true;
+                                    vm.steps.teetime.disabled = false;
+                                    if (vm.openStep) vm.openStep(vm.steps.teetime);
+                                });
+                                return 'forced teetime open';
+                            } catch(e) {
+                                return 'error: ' + e.message;
+                            }
+                        }
+                    }
+                    return 'vm not found';
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Force teetime: {teetime_open_result}")
+            await page.wait_for_timeout(3000)
 
             # Logger ce qu'on voit sur la page
             page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
