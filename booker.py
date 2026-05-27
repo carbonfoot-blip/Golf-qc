@@ -525,6 +525,83 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             """)
             logger.info(f"[Booker Chrono] Direct teetimes: {teetimes_result}")
 
+            # Extraire le teetime_id du résultat
+            import json as _json
+            try:
+                tt_data = _json.loads(teetimes_result)
+                teetime_id = tt_data.get("teetime_id")
+                logger.info(f"[Booker Chrono] teetime_id: {teetime_id}")
+            except Exception:
+                teetime_id = None
+
+            if not teetime_id:
+                await browser.close()
+                return {"succes": False, "message": f"Départ {heure} non trouvé.", "url_fallback": url_base}
+
+            # ── 7. Freeze + POST reservation via fetch JS ─────────────────────
+            booking_result = await page.evaluate(f"""
+                (async function() {{
+                    try {{
+                        // Freeze
+                        var freezeResp = await fetch('https://www.chronogolf.ca/fr/private_api/teetimes/{teetime_id}/freeze', {{
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {{'Content-Type': 'application/json', 'Accept': 'application/json'}},
+                            body: '{{}}'
+                        }});
+                        var freezeStatus = freezeResp.status;
+
+                        // POST reservation
+                        var rounds = [];
+                        for (var i = 0; i < {nb_joueurs}; i++) {{
+                            rounds.push({{'affiliation_type_id': {affiliation_id}, 'guest': null, 'state': 'reserved'}});
+                        }}
+                        var payload = {{
+                            reservation: {{
+                                club_id: {club_id},
+                                teetime_id: {teetime_id},
+                                state: 'confirmed',
+                                holes: 18,
+                                medium: 'profile',
+                                source: 'chronogolf',
+                                booking_engine: 1,
+                                made_online: true,
+                                rounds_attributes: rounds
+                            }}
+                        }};
+                        var resResp = await fetch('https://www.chronogolf.ca/marketplace/reservations', {{
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {{'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}},
+                            body: JSON.stringify(payload)
+                        }});
+                        var resBody = await resResp.text();
+                        return JSON.stringify({{freeze: freezeStatus, res: resResp.status, body: resBody.substring(0, 200)}});
+                    }} catch(e) {{
+                        return 'error: ' + e.message;
+                    }}
+                }})()
+            """)
+            logger.info(f"[Booker Chrono] Booking result: {booking_result}")
+            await browser.close()
+
+            try:
+                result = _json.loads(booking_result)
+                freeze_status = result.get("freeze", 0)
+                res_status = result.get("res", 0)
+                res_body = result.get("body", "")
+                logger.info(f"[Booker Chrono] Freeze: {freeze_status}, Reservation: {res_status}")
+
+                if res_status in [200, 201] and '"id"' in res_body:
+                    return {"succes": True, "message": "Réservation Chronogolf confirmée! Vérifiez votre courriel."}
+                elif res_status == 302:
+                    return {"succes": False, "message": "Session insuffisante.", "url_fallback": url_base}
+                else:
+                    return {"succes": False, "message": f"Erreur Chronogolf ({res_status}).", "url_fallback": url_base}
+            except Exception as e:
+                logger.error(f"[Booker Chrono] Parse error: {e}")
+                return {"succes": False, "message": "Erreur technique.", "url_fallback": url_base}
+
             # Logger ce qu'on voit sur la page
             page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
             logger.info(f"[Booker Chrono] Page après joueurs: {page_sample[:300]}")
