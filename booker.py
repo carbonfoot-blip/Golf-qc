@@ -19,10 +19,49 @@ async def reserver_depart(
 ) -> dict:
     systeme = terrain.get("systeme", "site_propre")
     if systeme == "gggolf":
-        return await _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs)
+        return await _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs, confirm_url)
     elif systeme == "chronogolf":
         return _reserver_chronogolf_link(terrain)
     return {"succes": False, "message": "Systeme non supporte."}
+
+
+async def _confirmer_ggg(page, teetimes_url: str) -> dict:
+    """Clique J'accepte et retourne le résultat."""
+    confirm_btn = await page.query_selector("input[name='nook']")
+    if not confirm_btn:
+        all_submits = await page.query_selector_all("input[type='submit']")
+        for btn in all_submits:
+            val = (await btn.get_attribute("value") or "").lower()
+            if "recherche" not in val and "cancel" not in val and val:
+                confirm_btn = btn
+                break
+
+    if not confirm_btn:
+        return {"succes": False, "message": "Bouton confirmation introuvable.", "url_fallback": teetimes_url}
+
+    btn_val = await confirm_btn.get_attribute("value") or ""
+    logger.info(f"[Booker GGG] Clic: '{btn_val[:60]}'")
+
+    try:
+        async with page.expect_navigation(timeout=20000):
+            await confirm_btn.click()
+    except Exception:
+        await page.wait_for_timeout(3000)
+
+    final_content = await page.content()
+    logger.info(f"[Booker GGG] Finale: {page.url} — {len(final_content)} chars")
+
+    for indicator in ["numero de reservation", "numéro de réservation", "confirmée", "merci", "thank you"]:
+        if indicator.lower() in final_content.lower():
+            logger.info(f"[Booker GGG] SUCCES")
+            return {"succes": True, "message": "Réservation GGG confirmée! Vérifiez votre courriel."}
+
+    for indicator in ["erreur", "impossible", "déjà réservé", "already"]:
+        if indicator.lower() in final_content.lower():
+            return {"succes": False, "message": "Erreur — départ peut-être déjà pris.", "url_fallback": teetimes_url}
+
+    logger.warning(f"[Booker GGG] Aucun indicateur. HTML[0:200]: {final_content[:200]}")
+    return {"succes": True, "message": "Réservation soumise. Vérifiez votre courriel."}
 
 
 def _reserver_chronogolf_link(terrain: dict) -> dict:
@@ -36,7 +75,7 @@ def _reserver_chronogolf_link(terrain: dict) -> dict:
     }
 
 
-async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs):
+async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs, confirm_url_direct=""):
     slug = terrain.get("ggg_slug", terrain["id"])
     login_url    = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=user&lang=fr"
     teetimes_url = f"https://secure.gggolf.ca/{slug}/index.php?option=com_ggpublic&req=teetimes&lang=fr"
@@ -88,7 +127,34 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs)
             logger.info(f"[Booker GGG] Cookies login: {list(cookie_dict.keys())}")
             await browser.close()
 
-        # ── Étape 2 : Recherche httpx avec cookies login ─────
+        # ── Étape 2a : Essayer d'abord avec confirm_url direct ─
+        if confirm_url_direct and "Keys=" in confirm_url_direct:
+            logger.info(f"[Booker GGG] Tentative avec confirm_url direct: {confirm_url_direct}")
+            async with async_playwright() as pw2:
+                browser2 = await pw2.chromium.launch(headless=True)
+                context2 = await browser2.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                    locale="fr-CA",
+                )
+                await context2.add_cookies([
+                    {"name": k, "value": v, "domain": "secure.gggolf.ca", "path": "/"}
+                    for k, v in cookie_dict.items()
+                ])
+                page2 = await context2.new_page()
+                await page2.goto(confirm_url_direct, timeout=TIMEOUT, wait_until="domcontentloaded")
+                await page2.wait_for_timeout(1000)
+                confirm_content2 = await page2.content()
+                logger.info(f"[Booker GGG] Direct confirm URL: {page2.url} — {len(confirm_content2)} chars")
+
+                if "accepte" in confirm_content2.lower():
+                    # Confirmation directe possible!
+                    result = await _confirmer_ggg(page2, teetimes_url)
+                    await browser2.close()
+                    return result
+                await browser2.close()
+            logger.info(f"[Booker GGG] confirm_url direct n'a pas fonctionné — recherche httpx")
+
+        # ── Étape 2b : Recherche httpx avec cookies login ────
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
@@ -114,10 +180,6 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs)
                     search_html = resp.text
                     logger.info(f"[Booker GGG] HTML riche obtenu")
                     break
-
-        # Logger le HTML pour debug
-        if search_html:
-            logger.info(f"[Booker GGG] HTML debug: {search_html[3000:4500]}")
 
         if not search_html:
             # Fallback: essayer sans cookies (session anonyme comme le scraper)
@@ -167,50 +229,11 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs)
             confirm_content = await page.content()
             if "accepte" not in confirm_content.lower():
                 await browser.close()
-                return {
-                    "succes": False,
-                    "message": "Le depart n'est plus disponible.",
-                    "url_fallback": teetimes_url,
-                }
+                return {"succes": False, "message": "Le depart n'est plus disponible.", "url_fallback": teetimes_url}
 
-            # Cliquer "J'accepte les termes"
-            confirm_btn = await page.query_selector("input[name='nook']")
-            if not confirm_btn:
-                all_submits = await page.query_selector_all("input[type='submit']")
-                for btn in all_submits:
-                    val = (await btn.get_attribute("value") or "").lower()
-                    if "recherche" not in val and "cancel" not in val and val:
-                        confirm_btn = btn
-                        break
-
-            if not confirm_btn:
-                await browser.close()
-                return {"succes": False, "message": "Bouton confirmation introuvable.", "url_fallback": teetimes_url}
-
-            btn_val = await confirm_btn.get_attribute("value") or ""
-            logger.info(f"[Booker GGG] Clic: '{btn_val[:60]}'")
-
-            try:
-                async with page.expect_navigation(timeout=20000):
-                    await confirm_btn.click()
-            except Exception:
-                await page.wait_for_timeout(3000)
-
-            final_content = await page.content()
-            logger.info(f"[Booker GGG] Finale: {page.url} — {len(final_content)} chars")
+            result = await _confirmer_ggg(page, teetimes_url)
             await browser.close()
-
-            for indicator in ["numero de reservation", "numéro de réservation", "confirmée", "merci", "thank you"]:
-                if indicator.lower() in final_content.lower():
-                    logger.info(f"[Booker GGG] SUCCES")
-                    return {"succes": True, "message": "Réservation GGG confirmée! Vérifiez votre courriel."}
-
-            for indicator in ["erreur", "impossible", "déjà réservé", "already"]:
-                if indicator.lower() in final_content.lower():
-                    return {"succes": False, "message": "Erreur — le depart est peut-être déjà pris.", "url_fallback": teetimes_url}
-
-            logger.warning(f"[Booker GGG] Aucun indicateur. HTML[0:300]: {final_content[:300]}")
-            return {"succes": True, "message": "Réservation soumise. Vérifiez votre courriel."}
+            return result
 
     except Exception as e:
         logger.error(f"[Booker GGG] Erreur: {e}")
