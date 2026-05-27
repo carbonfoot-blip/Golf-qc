@@ -160,30 +160,43 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            # Widget trouvé — explorer le scope vm interne
-            widget_driven = await page.evaluate(f"""
-                (function() {{
+            # Piloter le widget via vm Angular directement
+            widget_result = await page.evaluate(f"""
+                (async function() {{
                     try {{
-                        // Le widget interne est le composant avec aria-busy
+                        // Trouver le vm du widget
                         var els = document.querySelectorAll('[aria-busy], [club-id]');
-                        var results = [];
+                        var vm = null;
                         for (var el of els) {{
                             var sc = angular.element(el).isolateScope() || angular.element(el).scope();
-                            if (sc && sc.vm) {{
-                                var vmKeys = Object.keys(sc.vm).filter(k => !k.startsWith('$')).slice(0, 30);
-                                results.push('vm keys: ' + vmKeys.join(','));
-                            }} else if (sc) {{
-                                var scKeys = Object.keys(sc).filter(k => !k.startsWith('$')).slice(0, 15);
-                                results.push('scope: ' + scKeys.join(','));
-                            }}
+                            if (sc && sc.vm && sc.vm.steps) {{ vm = sc.vm; break; }}
                         }}
-                        return results.join(' | ') || 'no vm found';
+                        if (!vm) return 'vm non trouve';
+
+                        var results = [];
+                        
+                        // Étape 1: Date — utiliser getReservationDate et openStep
+                        var steps = vm.steps;
+                        results.push('steps: ' + steps.map(s => s.name || s.id || JSON.stringify(s).substring(0,30)).join(','));
+                        
+                        // Ouvrir la première étape (date)
+                        if (vm.openStep) {{
+                            vm.openStep(steps[0]);
+                            results.push('openStep(0) appelé');
+                        }}
+                        
+                        // Chercher le scope de la date
+                        var dateEls = document.querySelectorAll('[ng-model*="date"], [ng-model*="Date"]');
+                        results.push('date elements: ' + dateEls.length);
+                        
+                        return results.join(' | ');
                     }} catch(e) {{
                         return 'error: ' + e.message;
                     }}
                 }})()
             """)
-            logger.info(f"[Booker Chrono] Widget vm: {widget_driven}")
+            logger.info(f"[Booker Chrono] Widget vm result: {widget_result}")
+            await page.wait_for_timeout(2000)
 
             # Cliquer le bon jour dans le calendrier Angular
             day_result = await page.evaluate(f"""
