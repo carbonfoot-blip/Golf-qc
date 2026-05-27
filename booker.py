@@ -41,6 +41,10 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
     6. Cocher checkbox → Confirmer
     """
     slug = terrain.get("chronogolf_slug", terrain["id"])
+    club_id = terrain.get("chronogolf_club_id")
+    course_id = terrain.get("chronogolf_course_id")
+    affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
+    url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
     heure_norm = f"{int(heure.split(':')[0]):02d}:{heure.split(':')[1]}" if heure and ":" in heure else ""
 
