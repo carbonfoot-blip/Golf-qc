@@ -160,38 +160,29 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            # Explorer comment setter chaque étape correctement
-            booking_result = await page.evaluate(f"""
-                (async function() {{
-                    try {{
-                        var els = document.querySelectorAll('[aria-busy], [club-id]');
-                        var vm = null, vmEl = null, scope = null;
-                        for (var el of els) {{
-                            var sc = angular.element(el).isolateScope() || angular.element(el).scope();
-                            if (sc && sc.vm && sc.vm.steps) {{ vm = sc.vm; vmEl = el; scope = sc; break; }}
-                        }}
-                        if (!vm) return 'vm non trouve';
-
-                        var results = [];
-
-                        // Inspecter chaque step
-                        for (var stepName of ['date', 'course', 'players', 'teetime']) {{
-                            var s = vm.steps[stepName];
-                            if (s) {{
-                                var keys = Object.keys(s);
-                                var fns = keys.filter(k => typeof s[k] === 'function');
-                                results.push(stepName + ' fns:' + fns.join(',') + ' vals:' + JSON.stringify({{open:s.open, set:s.set, disabled:s.disabled, value:s.value}}).substring(0,100));
-                            }}
-                        }}
-
-                        return results.join(' || ');
-                    }} catch(e) {{
-                        return 'error: ' + e.message;
-                    }}
-                }})()
+            # Date step est open:true — le calendrier doit être dans le DOM
+            date_step_html = await page.evaluate("""
+                (() => {
+                    // Chercher le step date dans le widget
+                    var widget = document.querySelector('[aria-busy]');
+                    if (!widget) return 'widget not found';
+                    
+                    // Chercher les éléments de date/calendrier dans le widget
+                    var dateStep = widget.querySelector('[class*="step-date"], [class*="date-step"], [ng-if*="date"]');
+                    if (dateStep) return 'dateStep HTML: ' + dateStep.innerHTML.substring(0, 500);
+                    
+                    // Chercher table calendrier
+                    var table = widget.querySelector('table');
+                    if (table) return 'table: ' + table.outerHTML.substring(0, 400);
+                    
+                    // Logger tous les divs du widget
+                    var divs = widget.querySelectorAll('div[class]');
+                    var classes = Array.from(divs).slice(0,15).map(d => d.className.substring(0,40));
+                    return 'widget divs: ' + classes.join(' | ');
+                })()
             """)
-            logger.info(f"[Booker Chrono] Steps detail: {booking_result}")
-            await page.wait_for_timeout(2000)
+            logger.info(f"[Booker Chrono] Date step: {date_step_html[:500]}")
+            await page.wait_for_timeout(1000)
 
             # Cliquer le bon jour dans le calendrier Angular
             day_result = await page.evaluate(f"""
