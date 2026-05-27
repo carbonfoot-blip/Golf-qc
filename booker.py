@@ -181,6 +181,12 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
                 if resp.status_code == 200 and len(resp.text) > 15000:
                     search_html = resp.text
                     logger.info(f"[Booker GGG] HTML obtenu (session anonyme)")
+                    # Debug: chercher les heures dans le HTML
+                    import re as _re
+                    h_autogrid = _re.findall(r'data-colno="1"[^>]*>\s*(\d{1,2}:\d{2})\s*<', resp.text)
+                    h_fmt1 = _re.findall(r'Heure:?</span>\s*(\d{1,2}:\d{2})', resp.text, _re.IGNORECASE)
+                    h_general = _re.findall(r'(\d{1,2}:\d{2})', resp.text)[:10]
+                    logger.info(f"[Booker GGG] Heures autogrid: {h_autogrid} fmt1: {h_fmt1} general: {h_general}")
                     break
 
         # ── Étape 3 : Parser confirm_url depuis le HTML ──────
