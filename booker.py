@@ -176,9 +176,11 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     // Chercher la cellule du bon jour ({target_day})
                     var cells = dp.querySelectorAll('td[role="gridcell"] button, td.uib-day button');
                     var found = null;
+                    var targetDay = '{target_day}';
+                    var targetDayPad = targetDay.padStart(2, '0');
                     for (var cell of cells) {{
-                        var txt = cell.querySelector('span')?.textContent?.trim() || cell.textContent.trim();
-                        if (txt === '{target_day}' && !cell.disabled && !cell.closest('td.text-muted')) {{
+                        var txt = (cell.querySelector('span')?.textContent?.trim() || cell.textContent.trim());
+                        if ((txt === targetDay || txt === targetDayPad) && !cell.disabled && !cell.closest('td.text-muted')) {{
                             found = cell;
                             break;
                         }}
@@ -187,7 +189,7 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     if (found) {{
                         found.click();
                         await new Promise(r => setTimeout(r, 1000));
-                        return 'clicked day {target_day}';
+                        return 'clicked day ' + targetDay;
                     }}
 
                     // Fallback: chercher toutes les cellules visibles
