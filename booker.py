@@ -154,14 +154,27 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
             logger.info(f"[Booker GGG] Cookies login: {list(cookie_dict.keys())}")
             await browser.close()
 
-        # ── Étape 3a : Essayer avec Keys fraîches (pré-recherche) ──────────────
-        best_confirm_url = pre_confirm_url or (confirm_url_direct if "Keys=" in (confirm_url_direct or "") else "")
-        if best_confirm_url:
-            logger.info(f"[Booker GGG] Tentative avec confirm_url: {best_confirm_url}")
-            confirm_url_direct = best_confirm_url  # Réutiliser la logique existante
-        if best_confirm_url and "Keys=" in best_confirm_url:
-            logger.info(f"[Booker GGG] Tentative avec confirm_url direct: {best_confirm_url}")
-            confirm_url_direct = best_confirm_url
+        # ── Étape 3a : Recherche avec cookies LOGIN pour Keys valides ───────────
+        # Les Keys sont liées à la session — on doit les obtenir avec les cookies du login
+        logger.info(f"[Booker GGG] Recherche avec cookies login pour Keys valides")
+        confirm_url_direct = ""
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, cookies=cookie_dict) as auth_client:
+            await auth_client.get(teetimes_url, headers=headers)
+            for payload in payloads_pre:
+                resp = await auth_client.post(teetimes_url, data=payload, headers=headers)
+                logger.info(f"[Booker GGG] Auth POST: {len(resp.text)} chars (hour={payload['hour']})")
+                if resp.status_code == 200:
+                    found = _trouver_confirm_url_ggg(resp.text, heure, slug)
+                    if found:
+                        confirm_url_direct = found
+                        logger.info(f"[Booker GGG] Auth Keys: {confirm_url_direct}")
+                        break
+
+        if not confirm_url_direct:
+            # Fallback: utiliser les Keys de la pré-recherche anonyme
+            confirm_url_direct = pre_confirm_url
+            logger.info(f"[Booker GGG] Fallback Keys pre-recherche: {confirm_url_direct}")
+
         if confirm_url_direct and "Keys=" in confirm_url_direct:
             logger.info(f"[Booker GGG] Tentative avec confirm_url direct: {confirm_url_direct}")
             async with async_playwright() as pw2:
@@ -188,7 +201,7 @@ async def _reserver_gggolf(terrain, username, password, date, heure, nb_joueurs,
                 await browser2.close()
             logger.info(f"[Booker GGG] confirm_url direct n'a pas fonctionné — recherche httpx")
 
-        # ── Étape 2b : Recherche httpx EXACTEMENT comme le scraper ────────────
+        # ── Étape 2b (fallback) : Recherche httpx session anonyme ──────────────
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
