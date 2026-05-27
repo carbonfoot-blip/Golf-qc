@@ -246,21 +246,31 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             logger.info(f"[Booker Chrono] Clic date: {day_result}")
             await page.wait_for_timeout(2000)
 
-            # Étape 2 : 18 trous
+            # Étape 2 : 18 trous — cliquer dans le step course
             trous_btn = await page.query_selector(
-                "button:has-text('18 trous'), button:has-text('18'), "
-                "[class*='holes-18'], [ng-click*='18']"
+                "#panel-course-body button:has-text('18'), "
+                "[id*='course'] button:has-text('18'), "
+                "button:has-text('18 holes'), button:has-text('18 trous')"
             )
             if trous_btn:
-                await trous_btn.click(force=True)
+                await trous_btn.click()
                 await page.wait_for_timeout(500)
                 logger.info(f"[Booker Chrono] 18 trous")
+            else:
+                # Fallback
+                trous_btn2 = await page.query_selector("button:has-text('18')")
+                if trous_btn2:
+                    await trous_btn2.click()
+                    await page.wait_for_timeout(500)
+                    logger.info(f"[Booker Chrono] 18 trous (fallback)")
 
-            continuer = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
+            continuer = await page.query_selector("#panel-course-body button:has-text('Continuer'), #panel-course-body button:has-text('Continue')")
             if continuer:
-                await continuer.click(force=True)
+                await continuer.click()
                 await page.wait_for_timeout(1500)
                 logger.info(f"[Booker Chrono] Continuer (trous)")
+            else:
+                logger.warning(f"[Booker Chrono] Pas de Continuer trous")
 
             # ── 5. Popup "Combien de joueurs?" ────────────────────────────────
             joueur_btn = await page.query_selector(f"button:has-text('{nb_joueurs}')")
@@ -269,16 +279,33 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 await page.wait_for_timeout(1000)
                 logger.info(f"[Booker Chrono] {nb_joueurs} joueurs sélectionnés")
 
+            # Cliquer le bouton "Players" / "Joueurs" pour avancer
+            players_step_btn = await page.query_selector(
+                "button:has-text('Players'), button:has-text('Joueurs'), "
+                "[aria-controls='panel-players-body'] button, [class*='step-players'] button.panel-title-btn"
+            )
+            if players_step_btn:
+                await players_step_btn.click()
+                await page.wait_for_timeout(2000)
+                logger.info(f"[Booker Chrono] Players step ouvert")
+
+            # Maintenant chercher les boutons 1,2,3,4 joueurs dans le step players
+            joueur_select = await page.query_selector(f"#panel-players-body button:has-text('{nb_joueurs}'), [id*='players'] button:has-text('{nb_joueurs}')")
+            if joueur_select:
+                await joueur_select.click()
+                await page.wait_for_timeout(500)
+                logger.info(f"[Booker Chrono] {nb_joueurs} joueurs dans step players")
+
             # Logger les boutons disponibles
             btns_after = await page.evaluate("""
                 (() => {
                     var widget = document.querySelector('[aria-busy]');
                     if (!widget) return 'no widget';
-                    var btns = widget.querySelectorAll('button');
-                    return Array.from(btns).map(b => '"' + b.textContent.trim().substring(0,15) + '"[dis=' + b.disabled + ']').join(', ');
+                    var btns = widget.querySelectorAll('button:not([disabled])');
+                    return Array.from(btns).slice(0,10).map(b => '"' + b.textContent.trim().substring(0,20) + '"').join(', ');
                 })()
             """)
-            logger.info(f"[Booker Chrono] Boutons widget: {btns_after}")
+            logger.info(f"[Booker Chrono] Boutons après players: {btns_after}")
 
             continuer2 = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
             if continuer2:
