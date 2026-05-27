@@ -542,14 +542,29 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             booking_result = await page.evaluate(f"""
                 (async function() {{
                     try {{
+                        // Obtenir le CSRF token Angular
+                        var csrf = '';
+                        try {{
+                            var inj = angular.element(document.body).injector();
+                            csrf = inj.get('$http').defaults.headers.common['X-CSRF-Token'] || '';
+                        }} catch(e) {{}}
+
+                        var headers = {{
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }};
+                        if (csrf) headers['X-CSRF-Token'] = csrf;
+
                         // Freeze
                         var freezeResp = await fetch('https://www.chronogolf.ca/fr/private_api/teetimes/{teetime_id}/freeze', {{
                             method: 'POST',
                             credentials: 'include',
-                            headers: {{'Content-Type': 'application/json', 'Accept': 'application/json'}},
+                            headers: headers,
                             body: '{{}}'
                         }});
                         var freezeStatus = freezeResp.status;
+                        var freezeBody = await freezeResp.text();
 
                         // POST reservation
                         var rounds = [];
@@ -572,11 +587,11 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                         var resResp = await fetch('https://www.chronogolf.ca/marketplace/reservations', {{
                             method: 'POST',
                             credentials: 'include',
-                            headers: {{'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}},
+                            headers: headers,
                             body: JSON.stringify(payload)
                         }});
                         var resBody = await resResp.text();
-                        return JSON.stringify({{freeze: freezeStatus, res: resResp.status, body: resBody.substring(0, 200)}});
+                        return JSON.stringify({{csrf: csrf.substring(0,20), freeze: freezeStatus, freezeBody: freezeBody.substring(0,100), res: resResp.status, body: resBody.substring(0, 300)}});
                     }} catch(e) {{
                         return 'error: ' + e.message;
                     }}
