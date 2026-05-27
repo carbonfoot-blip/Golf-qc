@@ -289,6 +289,18 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 await page.wait_for_timeout(2000)
                 logger.info(f"[Booker Chrono] Players step ouvert")
 
+            # Logger le HTML du step players
+            players_html = await page.evaluate("""
+                (() => {
+                    var body = document.querySelector('#panel-players-body, [id*="players-body"]');
+                    if (body) return body.innerHTML.substring(0, 800);
+                    var all = document.querySelectorAll('[class*="step-players"], [class*="players-step"]');
+                    if (all.length) return all[0].innerHTML.substring(0, 800);
+                    return 'players body not found';
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Players HTML: {players_html[:500]}")
+
             # Maintenant chercher les boutons 1,2,3,4 joueurs dans le step players
             joueur_select = await page.query_selector(f"#panel-players-body button:has-text('{nb_joueurs}'), [id*='players'] button:has-text('{nb_joueurs}')")
             if joueur_select:
