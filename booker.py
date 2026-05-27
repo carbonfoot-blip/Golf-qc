@@ -160,26 +160,30 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            # Widget trouvé — piloter via Angular scope directement
+            # Widget trouvé — explorer le scope vm interne
             widget_driven = await page.evaluate(f"""
-                (async function() {{
+                (function() {{
                     try {{
-                        // Trouver le scope du widget Angular
-                        var widgetEl = document.querySelector('[club-id], .widget.ng-isolate-scope');
-                        if (!widgetEl) return 'widget element not found';
-                        
-                        var scope = angular.element(widgetEl).isolateScope() || angular.element(widgetEl).scope();
-                        if (!scope) return 'scope not found';
-                        
-                        var vm = scope.vm || scope;
-                        var keys = Object.keys(vm).filter(k => !k.startsWith('$')).slice(0, 20);
-                        return 'scope keys: ' + keys.join(',');
+                        // Le widget interne est le composant avec aria-busy
+                        var els = document.querySelectorAll('[aria-busy], [club-id]');
+                        var results = [];
+                        for (var el of els) {{
+                            var sc = angular.element(el).isolateScope() || angular.element(el).scope();
+                            if (sc && sc.vm) {{
+                                var vmKeys = Object.keys(sc.vm).filter(k => !k.startsWith('$')).slice(0, 30);
+                                results.push('vm keys: ' + vmKeys.join(','));
+                            }} else if (sc) {{
+                                var scKeys = Object.keys(sc).filter(k => !k.startsWith('$')).slice(0, 15);
+                                results.push('scope: ' + scKeys.join(','));
+                            }}
+                        }}
+                        return results.join(' | ') || 'no vm found';
                     }} catch(e) {{
                         return 'error: ' + e.message;
                     }}
                 }})()
             """)
-            logger.info(f"[Booker Chrono] Widget scope: {widget_driven}")
+            logger.info(f"[Booker Chrono] Widget vm: {widget_driven}")
 
             # Cliquer le bon jour dans le calendrier Angular
             day_result = await page.evaluate(f"""
@@ -231,9 +235,13 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             continuer2 = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
             if continuer2:
-                await continuer2.click()
-                await page.wait_for_timeout(5000)  # Attendre que les départs chargent
+                is_disabled = await continuer2.get_attribute("disabled")
+                logger.info(f"[Booker Chrono] Continuer joueurs: trouve, disabled={is_disabled}")
+                await continuer2.click(force=True)
+                await page.wait_for_timeout(5000)
                 logger.info(f"[Booker Chrono] Continuer (joueurs) — URL: {page.url}")
+            else:
+                logger.warning(f"[Booker Chrono] Continuer joueurs: NON TROUVE")
             
             # Logger ce qu'on voit sur la page
             page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
