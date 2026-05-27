@@ -143,63 +143,29 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             """)
             logger.info(f"[Booker Chrono] Club: {page.url} — connecté: {connected} — {len(await page.content())} chars")
 
-            # ── 3. Cliquer la date dans le calendrier ─────────────────────────
+            # ── 3. Trouver et interagir avec le panneau de réservation ───────
             date_parts = date.split('-')
             target_day = int(date_parts[2])
 
-            # Chercher le calendrier avec plusieurs sélecteurs
-            cal_html = await page.evaluate("""
+            # Logger le panneau de réservation
+            panel_info = await page.evaluate("""
                 (() => {
-                    var cal = document.querySelector('.datepicker, .calendar, [class*="datepick"], [class*="calendar"]');
-                    return cal ? cal.outerHTML.substring(0, 500) : 'calendrier non trouve';
+                    var results = [];
+                    var all = document.querySelectorAll('[class*="booking"], [class*="reservation"], [class*="teetime"], [ng-controller*="Club"], [ng-controller*="Booking"]');
+                    for (var el of all) {
+                        results.push(el.tagName + '.' + el.className.substring(0,50));
+                    }
+                    // Chercher par texte
+                    var body = document.body.innerHTML;
+                    var hasReservation = body.includes('Réservation en ligne');
+                    var hasCalendar = body.includes('juin 2026') || body.includes('mai 2026');
+                    var hasTrous = body.includes('18 trous') || body.includes('trous');
+                    return JSON.stringify({elements: results.slice(0,10), hasReservation, hasCalendar, hasTrous});
                 })()
             """)
-            logger.info(f"[Booker Chrono] Calendrier HTML: {cal_html[:200]}")
-
-            # Avancer dans le calendrier si nécessaire
-            for _ in range(6):  # max 6 mois
-                month_text = await page.evaluate("""
-                    document.querySelector('.datepicker-switch, .picker-switch, [class*="month-title"]')?.textContent?.trim() || ''
-                """)
-                logger.info(f"[Booker Chrono] Mois visible: {month_text}")
-
-                # Cliquer le bon jour
-                day_clicked = await page.evaluate(f"""
-                    (function() {{
-                        var cells = document.querySelectorAll('td.day:not(.old):not(.new), .datepicker-days td:not(.old):not(.new)');
-                        for (var c of cells) {{
-                            if (c.textContent.trim() === '{target_day}') {{
-                                c.click();
-                                return true;
-                            }}
-                        }}
-                        return false;
-                    }})()
-                """)
-                if day_clicked:
-                    logger.info(f"[Booker Chrono] Jour {target_day} cliqué")
-                    break
-
-                # Aller au mois suivant
-                next_btn = await page.query_selector(".next, [class*='next-month'], button[aria-label*='next']")
-                if next_btn:
-                    await next_btn.click()
-                    await page.wait_for_timeout(500)
+            logger.info(f"[Booker Chrono] Panneau: {panel_info}")
 
             await page.wait_for_timeout(2000)
-
-            # ── 4. Popup "Combien de trous?" → 18 trous ───────────────────────
-            trous_btn = await page.query_selector("button:has-text('18 trous'), [class*='holes'] button:has-text('18')")
-            if trous_btn:
-                await trous_btn.click()
-                await page.wait_for_timeout(500)
-                logger.info(f"[Booker Chrono] 18 trous sélectionnés")
-
-            continuer = await page.query_selector("button:has-text('Continuer'), button:has-text('Continue')")
-            if continuer:
-                await continuer.click()
-                await page.wait_for_timeout(1500)
-                logger.info(f"[Booker Chrono] Continuer (trous)")
 
             # ── 5. Popup "Combien de joueurs?" ────────────────────────────────
             joueur_btn = await page.query_selector(f"button:has-text('{nb_joueurs}')")
