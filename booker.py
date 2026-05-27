@@ -75,24 +75,32 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 await page.wait_for_timeout(2000)
                 logger.info(f"[Booker Chrono] Popup login ouvert")
 
+            # Attendre que les champs soient visibles
+            try:
+                await page.wait_for_selector("input[type='email'], input[name='email']", timeout=10000, state="visible")
+            except Exception:
+                logger.warning(f"[Booker Chrono] Champs email non trouvés après attente")
+
             email_field = await page.query_selector("input[name='email'], input[id='sessionEmail'], input[type='email']")
             pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword'], input[type='password']")
+
+            logger.info(f"[Booker Chrono] Champs: email={'oui' if email_field else 'non'} pwd={'oui' if pwd_field else 'non'}")
 
             if not email_field or not pwd_field:
                 await browser.close()
                 return {"succes": False, "message": "Page login Chronogolf introuvable.", "url_fallback": url_base}
 
+            await email_field.click()
+            await page.wait_for_timeout(200)
             await email_field.type(username, delay=30)
             await page.wait_for_timeout(300)
+            await pwd_field.click()
+            await page.wait_for_timeout(200)
             await pwd_field.type(password, delay=30)
             await page.wait_for_timeout(500)
 
-            # Soumettre
-            submit = await page.query_selector("button[type='submit']")
-            if submit:
-                await submit.click()
-            else:
-                await pwd_field.press("Enter")
+            # Soumettre — utiliser Enter au lieu de cliquer le bouton
+            await pwd_field.press("Enter")
 
             # Attendre que le popup disparaisse
             try:
