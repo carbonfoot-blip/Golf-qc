@@ -101,17 +101,29 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
 
             logger.info(f"[Booker Chrono] Login OK: {page.url}")
 
-            # ── 2. Page du club ───────────────────────────────────────────────
+            # ── 2. Page du club via navigation Angular (pas goto) ────────────
+            # Utiliser goto mais attendre que Angular initialise la session
             await page.goto(url_base, timeout=TIMEOUT, wait_until="domcontentloaded")
-            await page.wait_for_timeout(4000)
-            logger.info(f"[Booker Chrono] Club: {page.url} — {len(await page.content())} chars")
+            await page.wait_for_timeout(5000)
+            
+            # Vérifier si connecté sur la page du club
+            connected = await page.evaluate("""
+                document.querySelector('[ng-controller*="club"], .user-name, a:contains("Déconnexion"), a[href*="logout"]') !== null ||
+                document.body.innerText.includes('Déconnexion') ||
+                document.body.innerText.includes('Mon compte')
+            """)
+            logger.info(f"[Booker Chrono] Club: {page.url} — connecté: {connected} — {len(await page.content())} chars")
 
             # ── 3. Cliquer la date dans le calendrier ─────────────────────────
-            # Naviguer au bon mois si nécessaire
             date_parts = date.split('-')
             target_day = int(date_parts[2])
-            target_month = int(date_parts[1])
-            target_year = int(date_parts[0])
+
+            # Chercher le calendrier avec plusieurs sélecteurs
+            cal_html = await page.evaluate("""
+                var cal = document.querySelector('.datepicker, .calendar, [class*="datepick"], [class*="calendar"]');
+                return cal ? cal.outerHTML.substring(0, 500) : 'calendrier non trouvé';
+            """)
+            logger.info(f"[Booker Chrono] Calendrier HTML: {cal_html[:200]}")
 
             # Avancer dans le calendrier si nécessaire
             for _ in range(6):  # max 6 mois
