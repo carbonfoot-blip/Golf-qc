@@ -32,171 +32,222 @@ async def reserver_depart(terrain, confirm_url, username, password, date="", heu
 
 async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, password: str, date: str = "", heure: str = "", nb_joueurs: int = 2) -> dict:
     """
-    Flow Chronogolf:
-    1. Playwright visite chronogolf.ca pour obtenir cf_clearance
-    2. httpx login via /marketplace/sessions avec cf_clearance
-    3. httpx GET teetimes -> teetime_id
-    4. httpx POST /private_api/teetimes/{id}/freeze -> cookie teetime_freeze
-    5. httpx POST /marketplace/reservations avec tous les cookies
+    Flow Chronogolf 100% Playwright:
+    1. Login sur .ca via popup Angular (Turnstile passe automatiquement)
+    2. Naviguer vers la page booking du terrain
+    3. Sélectionner la date
+    4. Cliquer sur le départ voulu → génère teetime_freeze automatiquement
+    5. Cocher "J'accepte" et confirmer → POST fait par Angular
     """
     slug = terrain.get("chronogolf_slug", terrain["id"])
     club_id = terrain.get("chronogolf_club_id")
-    course_id = terrain.get("chronogolf_course_id")
-    affiliation_id = terrain.get("chronogolf_affiliation_id", 98)
-    url_prefix = terrain.get("chronogolf_url_prefix", "fr/marketplace")
     url_base = f"https://www.chronogolf.ca/club/{slug}"
+    booking_url = f"https://www.chronogolf.ca/club/{slug}/booking/?source=chronogolf&medium=profile"
 
-    logger.info(f"[Booker Chrono] Debut: {terrain['nom']} — {date} {heure}")
-
-    if not club_id or not course_id:
-        return {"succes": False, "message": "Configuration manquante.", "url_fallback": url_base}
+    logger.info(f"[Booker Chrono] Debut Playwright pur: {terrain['nom']} — {date} {heure}")
 
     heure_norm = f"{int(heure.split(':')[0]):02d}:{heure.split(':')[1]}" if heure and ":" in heure else ""
 
     try:
-        # ── 1. Playwright pour obtenir cf_clearance ───────────────────────────
-        logger.info(f"[Booker Chrono] Obtention cf_clearance via Playwright")
-        cf_clearance = ""
-        chronogolf_session = ""
+        import json as _json
 
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+            )
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 locale="fr-CA",
+                viewport={"width": 1280, "height": 800},
             )
+            await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             page = await context.new_page()
-            await page.goto(f"https://www.chronogolf.ca/club/{slug}", timeout=TIMEOUT, wait_until="domcontentloaded")
+
+            # ── 1. Login sur .ca ──────────────────────────────────────────────
+            await page.goto("https://www.chronogolf.ca/fr", timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(2000)
+
+            # Cliquer Se connecter
+            login_btn = await page.query_selector("a[ng-click*='openLightbox'], a[ng-click*='login'], a:has-text('Se connecter')")
+            if login_btn:
+                await login_btn.click()
+                await page.wait_for_timeout(2000)
+                logger.info(f"[Booker Chrono] Popup login ouvert")
+
+            email_field = await page.query_selector("input[name='email'], input[id='sessionEmail'], input[type='email']")
+            pwd_field   = await page.query_selector("input[name='password'], input[id='sessionPassword'], input[type='password']")
+
+            if not email_field or not pwd_field:
+                await browser.close()
+                return {"succes": False, "message": "Page login Chronogolf introuvable.", "url_fallback": url_base}
+
+            await email_field.type(username, delay=30)
+            await page.wait_for_timeout(300)
+            await pwd_field.type(password, delay=30)
+            await page.wait_for_timeout(500)
+
+            # Soumettre
+            submit = await page.query_selector("button[type='submit']")
+            if submit:
+                await submit.click()
+            else:
+                await pwd_field.press("Enter")
+
+            # Attendre que le popup disparaisse
+            try:
+                await page.wait_for_function(
+                    "!document.querySelector('.session-lightbox.ng-scope.active')",
+                    timeout=15000
+                )
+            except Exception:
+                await page.wait_for_timeout(5000)
+
+            logger.info(f"[Booker Chrono] Apres login: {page.url}")
+
+            # Vérifier si connecté
+            content = await page.content()
+            if "Se connecter" in content and "session-lightbox" in content and "active" in content:
+                await browser.close()
+                return {"succes": False, "message": "Login Chronogolf échoué.", "url_fallback": url_base}
+
+            logger.info(f"[Booker Chrono] Login réussi!")
+
+            # ── 2. Naviguer vers la page booking ─────────────────────────────
+            await page.goto(booking_url, timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(4000)
+            logger.info(f"[Booker Chrono] Booking: {page.url}")
+
+            # ── 3. Sélectionner la date ───────────────────────────────────────
+            # Entrer la date dans le calendrier Angular
+            date_set = await page.evaluate(f"""
+                (function() {{
+                    // Trouver le scope Angular de la page de booking
+                    var el = document.querySelector('[ng-controller]') || document.querySelector('[data-ng-controller]');
+                    if (!el) return 'no-controller';
+                    var scope = angular.element(el).scope();
+                    if (!scope) return 'no-scope';
+                    scope.$apply(function() {{
+                        if (scope.selectedDate !== undefined) scope.selectedDate = new Date('{date}T12:00:00');
+                        if (scope.date !== undefined) scope.date = '{date}';
+                        if (scope.search) scope.search.date = '{date}';
+                    }});
+                    return 'ok';
+                }})()
+            """)
+            logger.info(f"[Booker Chrono] Date set: {date_set}")
+
+            # Cliquer sur la date dans le calendrier si visible
+            try:
+                # Chercher le jour dans le calendrier
+                day = str(int(date.split('-')[2]))
+                date_btn = await page.query_selector(f"td.day:not(.old):not(.new):has-text('{day}'), .datepicker-days td:not(.old):not(.new):has-text('{day}')")
+                if date_btn:
+                    await date_btn.click()
+                    await page.wait_for_timeout(2000)
+                    logger.info(f"[Booker Chrono] Date cliquée: {day}")
+            except Exception as e:
+                logger.warning(f"[Booker Chrono] Clic date: {e}")
+
+            await page.wait_for_timeout(2000)
+
+            # ── 4. Intercepter les requêtes POST reservation ──────────────────
+            reservation_result = {"done": False}
+
+            async def handle_response(response):
+                if "marketplace/reservations" in response.url and response.request.method == "POST":
+                    status = response.status
+                    try:
+                        body = await response.text()
+                        logger.info(f"[Booker Chrono] Intercept POST reservations: {status} — {body[:150]}")
+                        reservation_result["status"] = status
+                        reservation_result["body"] = body
+                        reservation_result["done"] = True
+                    except Exception:
+                        pass
+
+            page.on("response", handle_response)
+
+            # ── 5. Cliquer sur le départ voulu ───────────────────────────────
+            # Chercher les départs disponibles dans la page
+            await page.wait_for_timeout(2000)
+
+            # Chercher via l'API Angular dans le scope
+            teeimes_info = await page.evaluate(f"""
+                (function() {{
+                    try {{
+                        var scopes = document.querySelectorAll('[ng-repeat*="teetime"], [ng-repeat*="tee_time"]');
+                        return 'found ' + scopes.length + ' ng-repeat';
+                    }} catch(e) {{ return 'error: ' + e.message; }}
+                }})()
+            """)
+            logger.info(f"[Booker Chrono] TeeTime elements: {teeimes_info}")
+
+            # Chercher le départ par l'heure dans le DOM
+            teetime_clicked = await page.evaluate(f"""
+                (async function() {{
+                    // Attendre que les départs chargent
+                    await new Promise(r => setTimeout(r, 2000));
+
+                    // Chercher tous les éléments avec l'heure cible
+                    var heure = '{heure_norm}';
+                    var elements = Array.from(document.querySelectorAll('*'));
+                    var found = elements.filter(el =>
+                        el.children.length === 0 &&
+                        el.textContent.trim() === heure
+                    );
+                    if (found.length > 0) {{
+                        // Cliquer sur le parent cliquable
+                        var el = found[0];
+                        while (el && !el.onclick && el.tagName !== 'BUTTON' && el.tagName !== 'A' && !el.getAttribute('ng-click')) {{
+                            el = el.parentElement;
+                        }}
+                        if (el) {{ el.click(); return 'clicked: ' + el.tagName; }}
+                        found[0].click();
+                        return 'clicked fallback';
+                    }}
+                    return 'not found - heures: ' + elements.filter(e => e.textContent.match(/^\d{{2}}:\d{{2}}$/)).slice(0,5).map(e=>e.textContent.trim()).join(',');
+                }})()
+            """)
+            logger.info(f"[Booker Chrono] Clic départ: {teetime_clicked}")
+
             await page.wait_for_timeout(3000)
 
-            all_cookies = await context.cookies()
-            cookie_dict_pw = {}
-            for c in all_cookies:
-                cookie_dict_pw[c["name"]] = c["value"]
-                if c["name"] == "cf_clearance":
-                    cf_clearance = c["value"]
-                elif c["name"] == "_chronogolf_session":
-                    chronogolf_session = c["value"]
-            logger.info(f"[Booker Chrono] Cookies Playwright: {list(cookie_dict_pw.keys())}")
-            logger.info(f"[Booker Chrono] cf_clearance: {'oui' if cf_clearance else 'non'}")
+            # Si le départ a été cliqué, chercher la checkbox et confirmer
+            page_content = await page.content()
+            logger.info(f"[Booker Chrono] Après clic: {page.url} — {len(page_content)} chars")
+
+            # Cocher la checkbox "J'accepte"
+            checkbox = await page.query_selector("input[type='checkbox'], input[ng-model*='accept'], input[ng-model*='terms']")
+            if checkbox:
+                await checkbox.click()
+                await page.wait_for_timeout(500)
+                logger.info(f"[Booker Chrono] Checkbox cochée")
+
+            # Cliquer "Confirmer la réservation"
+            confirm_btn = await page.query_selector(
+                "button:has-text('Confirmer'), button:has-text('Confirm'), "
+                "button[ng-click*='confirm'], button[ng-click*='book'], "
+                "button[ng-disabled*='accept']"
+            )
+            if confirm_btn:
+                await confirm_btn.click()
+                logger.info(f"[Booker Chrono] Bouton confirmer cliqué")
+                await page.wait_for_timeout(5000)
+            else:
+                logger.warning(f"[Booker Chrono] Bouton confirmer non trouvé")
+
             await browser.close()
 
-        if not cf_clearance:
-            return {"succes": False, "message": "Impossible d'obtenir cf_clearance.", "url_fallback": url_base}
-
-        # ── 2. Login httpx avec cf_clearance ─────────────────────────────────
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "Origin": "https://www.chronogolf.ca",
-            "Referer": f"https://www.chronogolf.ca/club/{slug}",
-            "X-Requested-With": "XMLHttpRequest",
-        }
-        # Utiliser TOUS les cookies Playwright (inclus _cf_bm)
-        cookies = {**cookie_dict_pw}
-        logger.info(f"[Booker Chrono] Cookies pour httpx: {list(cookies.keys())}")
-
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers, cookies=cookies) as client:
-            login_resp = await client.post(
-                "https://www.chronogolf.ca/marketplace/sessions",
-                json={"session": {"email": username, "password": password}},
-            )
-            logger.info(f"[Booker Chrono] Login: {login_resp.status_code}")
-            if login_resp.status_code not in [200, 201]:
-                return {"succes": False, "message": "Identifiants Chronogolf incorrects."}
-
-            # ── 3. GET teetimes ───────────────────────────────────────────────
-            teetimes_url = f"https://www.chronogolf.ca/{url_prefix}/clubs/{club_id}/teetimes"
-            params = {
-                "date": date, "course_id": str(course_id),
-                "nb_holes": "18", "nb_players": str(nb_joueurs),
-                "affiliation_type_ids[]": str(affiliation_id),
-            }
-            tt_resp = await client.get(teetimes_url, params=params)
-            logger.info(f"[Booker Chrono] Teetimes: {tt_resp.status_code}")
-            if tt_resp.status_code != 200:
-                return {"succes": False, "message": "Impossible de récupérer les départs.", "url_fallback": url_base}
-
-            slots = tt_resp.json()
-            if isinstance(slots, dict):
-                slots = slots.get("tee_times") or slots.get("teetimes") or []
-
-            teetime_id = None
-            for slot in slots:
-                start = slot.get("start_time") or slot.get("time") or ""
-                if "T" in str(start):
-                    start = str(start).split("T")[1][:5]
-                h = f"{int(start.split(':')[0]):02d}:{start.split(':')[1]}" if ":" in str(start) else ""
-                if h == heure_norm:
-                    teetime_id = slot.get("id")
-                    logger.info(f"[Booker Chrono] teetime_id: {teetime_id}")
-                    break
-
-            if not teetime_id:
-                return {"succes": False, "message": f"Le départ de {heure} n'est plus disponible.", "url_fallback": url_base}
-
-            # ── 4. POST freeze pour générer teetime_freeze cookie ─────────────
-            # Essayer plusieurs URLs de freeze
-            freeze_urls = [
-                f"https://www.chronogolf.ca/fr/private_api/teetimes/{teetime_id}/freeze",
-                f"https://www.chronogolf.ca/private_api/teetimes/{teetime_id}/freeze",
-                f"https://www.chronogolf.ca/marketplace/teetimes/{teetime_id}/freeze",
-            ]
-            freeze_ok = False
-            for freeze_url in freeze_urls:
-                freeze_resp = await client.post(
-                    freeze_url, content=b"{}",
-                    headers={**headers, "Content-Length": "2"},
-                    follow_redirects=False,
-                )
-                logger.info(f"[Booker Chrono] Freeze {freeze_url.split('chronogolf.ca')[1]}: {freeze_resp.status_code}")
-                if freeze_resp.status_code in [200, 201]:
-                    freeze_ok = True
-                    break
-
-            teetime_freeze = client.cookies.get("teetime_freeze", "")
-            logger.info(f"[Booker Chrono] teetime_freeze: {'oui' if teetime_freeze else 'non'}")
-
-            if not freeze_ok:
-                logger.warning(f"[Booker Chrono] Freeze échoué sur toutes les URLs")
-
-            # ── 5. POST reservation ───────────────────────────────────────────
-            rounds = [
-                {"affiliation_type_id": affiliation_id, "guest": None, "state": "reserved"}
-                for _ in range(nb_joueurs)
-            ]
-            payload = {
-                "reservation": {
-                    "club_id": club_id,
-                    "teetime_id": teetime_id,
-                    "state": "confirmed",
-                    "holes": 18,
-                    "medium": "profile",
-                    "source": "chronogolf",
-                    "booking_engine": 1,
-                    "made_online": True,
-                    "rounds_attributes": rounds,
-                }
-            }
-
-            res_resp = await client.post(
-                "https://www.chronogolf.ca/marketplace/reservations",
-                json=payload,
-                follow_redirects=False,
-            )
-            logger.info(f"[Booker Chrono] Reservation: {res_resp.status_code} — {res_resp.text[:200]}")
-
-            if res_resp.status_code in [200, 201]:
-                body = res_resp.text
-                if body.strip().startswith("{") and '"id"' in body:
+            # Vérifier le résultat
+            if reservation_result.get("done"):
+                status = reservation_result.get("status", 0)
+                body = reservation_result.get("body", "")
+                if status in [200, 201] and '"id"' in body:
                     return {"succes": True, "message": "Réservation Chronogolf confirmée! Vérifiez votre courriel."}
-                return {"succes": False, "message": "Session insuffisante.", "url_fallback": url_base}
+                return {"succes": False, "message": f"Erreur Chronogolf ({status}).", "url_fallback": url_base}
 
-            if res_resp.status_code == 302:
-                return {"succes": False, "message": "Session expirée. Réessayez.", "url_fallback": url_base}
-
-            return {"succes": False, "message": f"Erreur Chronogolf ({res_resp.status_code}).", "url_fallback": url_base}
+            return {"succes": False, "message": "Réservation non complétée. Réessayez.", "url_fallback": url_base}
 
     except Exception as e:
         logger.error(f"[Booker Chrono] Erreur: {e}")
