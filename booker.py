@@ -66,8 +66,8 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                 locale="fr-CA",
             )
             page = await context.new_page()
-            await page.goto(f"https://www.chronogolf.ca/club/{slug}", timeout=TIMEOUT, wait_until="networkidle")
-            await page.wait_for_timeout(2000)
+            await page.goto(f"https://www.chronogolf.ca/club/{slug}", timeout=TIMEOUT, wait_until="domcontentloaded")
+            await page.wait_for_timeout(3000)
 
             all_cookies = await context.cookies()
             for c in all_cookies:
