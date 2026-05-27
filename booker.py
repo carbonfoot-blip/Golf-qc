@@ -160,28 +160,31 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            # Date step est open:true — le calendrier doit être dans le DOM
-            date_step_html = await page.evaluate("""
-                (() => {
-                    // Chercher le step date dans le widget
-                    var widget = document.querySelector('[aria-busy]');
-                    if (!widget) return 'widget not found';
-                    
-                    // Chercher les éléments de date/calendrier dans le widget
-                    var dateStep = widget.querySelector('[class*="step-date"], [class*="date-step"], [ng-if*="date"]');
-                    if (dateStep) return 'dateStep HTML: ' + dateStep.innerHTML.substring(0, 500);
-                    
-                    // Chercher table calendrier
-                    var table = widget.querySelector('table');
-                    if (table) return 'table: ' + table.outerHTML.substring(0, 400);
-                    
-                    // Logger tous les divs du widget
-                    var divs = widget.querySelectorAll('div[class]');
-                    var classes = Array.from(divs).slice(0,15).map(d => d.className.substring(0,40));
-                    return 'widget divs: ' + classes.join(' | ');
-                })()
+            # Le step date a un panel-title-btn et panel-date-body
+            # Cliquer le bouton pour s'assurer que le panel est ouvert
+            date_panel_result = await page.evaluate(f"""
+                (async function() {{
+                    // Cliquer le bouton du panel date
+                    var btn = document.querySelector('[aria-controls="panel-date-body"]');
+                    if (btn) btn.click();
+                    await new Promise(r => setTimeout(r, 1000));
+
+                    // Chercher le body du panel date
+                    var body = document.querySelector('#panel-date-body, [id*="panel-date"]');
+                    if (body) {{
+                        // Chercher le calendrier dans le body
+                        var cal = body.querySelector('table, .datepicker, [class*="datepick"]');
+                        if (cal) return 'cal found: ' + cal.outerHTML.substring(0, 600);
+                        return 'body html: ' + body.innerHTML.substring(0, 600);
+                    }}
+
+                    // Chercher par aria
+                    var allBodies = document.querySelectorAll('[class*="panel-body"], [class*="panel-collapse"]');
+                    var results = Array.from(allBodies).map(b => b.id + ':' + b.className.substring(0,30) + ':' + b.innerHTML.substring(0,100));
+                    return 'bodies: ' + results.slice(0,5).join(' | ');
+                }})()
             """)
-            logger.info(f"[Booker Chrono] Date step: {date_step_html[:500]}")
+            logger.info(f"[Booker Chrono] Panel date body: {date_panel_result[:500]}")
             await page.wait_for_timeout(1000)
 
             # Cliquer le bon jour dans le calendrier Angular
