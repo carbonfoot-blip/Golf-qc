@@ -479,6 +479,48 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             """)
             logger.info(f"[Booker Chrono] VM state: {vm_state}")
 
+            # Les paramètres sont prêts mais aucune requête API — la déclencher manuellement
+            teetimes_result = await page.evaluate(f"""
+                (async function() {{
+                    try {{
+                        // Faire la requête teetimes directement
+                        var url = 'https://www.chronogolf.ca/fr/marketplace/clubs/{club_id}/teetimes';
+                        var params = new URLSearchParams({{
+                            date: '{date}',
+                            course_id: '{course_id}',
+                            nb_holes: '18',
+                            nb_players: '{nb_joueurs}',
+                            'affiliation_type_ids[]': '{affiliation_id}'
+                        }});
+                        var resp = await fetch(url + '?' + params.toString(), {{
+                            credentials: 'include',
+                            headers: {{'Accept': 'application/json'}}
+                        }});
+                        var data = await resp.json();
+                        var slots = Array.isArray(data) ? data : (data.tee_times || data.teetimes || []);
+
+                        // Trouver le teetime_id pour l'heure cible
+                        var heure = '{heure_norm}';
+                        var found = null;
+                        for (var slot of slots) {{
+                            var t = slot.start_time || slot.time || '';
+                            if (t.includes('T')) t = t.split('T')[1].substring(0,5);
+                            var h = t.substring(0,2).padStart(2,'0') + ':' + t.substring(3,5);
+                            if (h === heure) {{ found = slot; break; }}
+                        }}
+
+                        if (!found) {{
+                            var heures = slots.slice(0,5).map(s => s.start_time || s.time || '');
+                            return JSON.stringify({{status: resp.status, count: slots.length, heures: heures, found: null}});
+                        }}
+                        return JSON.stringify({{status: resp.status, count: slots.length, teetime_id: found.id, heure: heure}});
+                    }} catch(e) {{
+                        return 'error: ' + e.message;
+                    }}
+                }})()
+            """)
+            logger.info(f"[Booker Chrono] Direct teetimes: {teetimes_result}")
+
             # Logger ce qu'on voit sur la page
             page_sample = await page.evaluate("document.body.innerText.substring(0, 500)")
             logger.info(f"[Booker Chrono] Page après joueurs: {page_sample[:300]}")
