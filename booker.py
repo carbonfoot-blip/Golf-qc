@@ -380,6 +380,27 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             # ── 6. Cliquer sur le départ voulu ───────────────────────────────
             logger.info(f"[Booker Chrono] Cherche départ {heure_norm}")
 
+            # Logger le HTML du step teetime
+            teetime_html = await page.evaluate("""
+                (() => {
+                    var body = document.querySelector('#panel-teetime-body, [id*="teetime-body"]');
+                    if (body) return 'FOUND: ' + body.innerHTML.substring(0, 800);
+                    // Chercher par classe
+                    var all = document.querySelectorAll('[class*="teetime"], [class*="tee-time"]');
+                    if (all.length) return 'CLASS: ' + all[0].innerHTML.substring(0, 400);
+                    // Chercher les heures directement
+                    var times = [];
+                    document.querySelectorAll('*').forEach(el => {
+                        if (el.children.length === 0 && /^\d{2}:\d{2}$/.test(el.textContent.trim())) {
+                            times.push(el.textContent.trim());
+                        }
+                    });
+                    return 'TIMES: ' + times.slice(0,10).join(',') + ' | steps teetime disabled: ' + 
+                           (angular.element(document.querySelector('[aria-busy]')).isolateScope()?.vm?.steps?.teetime?.disabled);
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Teetime HTML: {teetime_html[:500]}")
+
             # Attendre que les départs chargent
             await page.wait_for_timeout(2000)
 
