@@ -53,7 +53,7 @@ async def _rechercher_ggg(teetimes_url, date, heure_h, heure_h_pad, nb_joueurs, 
             tag = "auth" if cookies else "anon"
             logger.info(f"[Booker GGG] POST {tag}: {len(resp.text)} chars (hour={payload['hour']})")
             if resp.status_code == 200:
-                found = _trouver_confirm_url_ggg(resp.text, payload.get("hour", ""), slug)
+                found = _trouver_confirm_url_ggg(resp.text, heure, slug)
                 if found:
                     return found
     return ""
