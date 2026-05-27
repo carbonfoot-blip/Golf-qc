@@ -246,31 +246,26 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
             logger.info(f"[Booker Chrono] Clic date: {day_result}")
             await page.wait_for_timeout(2000)
 
-            # Étape 2 : 18 trous — cliquer dans le step course
-            trous_btn = await page.query_selector(
-                "#panel-course-body button:has-text('18'), "
-                "[id*='course'] button:has-text('18'), "
-                "button:has-text('18 holes'), button:has-text('18 trous')"
-            )
-            if trous_btn:
-                await trous_btn.click()
-                await page.wait_for_timeout(500)
-                logger.info(f"[Booker Chrono] 18 trous")
-            else:
-                # Fallback
-                trous_btn2 = await page.query_selector("button:has-text('18')")
-                if trous_btn2:
-                    await trous_btn2.click()
-                    await page.wait_for_timeout(500)
-                    logger.info(f"[Booker Chrono] 18 trous (fallback)")
+            # Logger HTML step course
+            course_html = await page.evaluate("""
+                (() => {
+                    var body = document.querySelector('#panel-course-body, [id*="course-body"]');
+                    if (body) return body.innerHTML.substring(0, 600);
+                    return 'course body not found';
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Course HTML: {course_html[:400]}")
 
-            continuer = await page.query_selector("#panel-course-body button:has-text('Continuer'), #panel-course-body button:has-text('Continue')")
-            if continuer:
-                await continuer.click()
-                await page.wait_for_timeout(1500)
-                logger.info(f"[Booker Chrono] Continuer (trous)")
-            else:
-                logger.warning(f"[Booker Chrono] Pas de Continuer trous")
+            # Step 2: Trous — chercher les labels radio dans le step course
+            trous_label = await page.evaluate("""
+                (() => {
+                    var body = document.querySelector('#panel-course-body');
+                    if (!body) return 'no course body';
+                    var labels = body.querySelectorAll('label, input');
+                    return Array.from(labels).slice(0,8).map(l => l.tagName + ':' + (l.textContent || l.value || '').trim().substring(0,20)).join(', ');
+                })()
+            """)
+            logger.info(f"[Booker Chrono] Course labels: {trous_label}")
 
             # ── 5. Popup "Combien de joueurs?" ────────────────────────────────
             joueur_btn = await page.query_selector(f"button:has-text('{nb_joueurs}')")
