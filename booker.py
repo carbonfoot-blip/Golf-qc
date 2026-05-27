@@ -160,39 +160,70 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     await reserve_btn.click()
                     await page.wait_for_timeout(2000)
 
-            widget_result = await page.evaluate(f"""
-                (function() {{
+            # Piloter le widget via vm.steps
+            booking_result = await page.evaluate(f"""
+                (async function() {{
                     try {{
+                        // Trouver le vm
                         var els = document.querySelectorAll('[aria-busy], [club-id]');
-                        var vm = null;
+                        var vm = null, vmEl = null;
                         for (var el of els) {{
                             var sc = angular.element(el).isolateScope() || angular.element(el).scope();
-                            if (sc && sc.vm && sc.vm.steps) {{ vm = sc.vm; break; }}
+                            if (sc && sc.vm && sc.vm.steps) {{ vm = sc.vm; vmEl = el; break; }}
                         }}
                         if (!vm) return 'vm non trouve';
 
-                        var steps = vm.steps;
-                        var stepsType = typeof steps + ' / ' + (Array.isArray(steps) ? 'array' : 'not array');
-                        var stepsKeys = Object.keys(steps).slice(0, 10);
-                        
-                        // Essayer d'ouvrir l'étape date via les clés
-                        var firstStep = steps[stepsKeys[0]];
-                        var firstStepKeys = firstStep ? Object.keys(firstStep).join(',') : 'null';
-                        
-                        return JSON.stringify({{
-                            stepsType: stepsType,
-                            stepsKeys: stepsKeys,
-                            firstStepKeys: firstStepKeys,
-                            vmReady: vm.ready,
-                            vmLoading: vm.loading
+                        var scope = angular.element(vmEl).isolateScope() || angular.element(vmEl).scope();
+                        var results = [];
+
+                        // Étape 1: Date
+                        var targetDate = new Date('{date}T12:00:00');
+                        scope.$apply(function() {{
+                            vm.steps.date.set(targetDate);
+                            vm.steps.date.open = false;
                         }});
+                        results.push('date set: {date}');
+                        await new Promise(r => setTimeout(r, 1000));
+
+                        // Vérifier course step
+                        var courseKeys = vm.steps.course ? Object.keys(vm.steps.course).join(',') : 'null';
+                        results.push('course keys: ' + courseKeys);
+
+                        // Étape 2: Course (18 trous)
+                        if (vm.steps.course && vm.steps.course.set) {{
+                            // Trouver le cours 18 trous
+                            var courseId = null;
+                            if (vm.getReservationCourse) {{
+                                var courses = vm.getReservationCourse();
+                                results.push('courses: ' + JSON.stringify(courses).substring(0,100));
+                            }}
+                            scope.$apply(function() {{
+                                vm.steps.course.open = false;
+                            }});
+                        }}
+
+                        // Étape 3: Joueurs
+                        scope.$apply(function() {{
+                            if (vm.steps.players && vm.steps.players.set) {{
+                                vm.steps.players.set({nb_joueurs});
+                                vm.steps.players.open = false;
+                            }}
+                        }});
+                        results.push('players set: {nb_joueurs}');
+                        await new Promise(r => setTimeout(r, 500));
+
+                        // Vérifier l'état après
+                        results.push('date.set: ' + JSON.stringify(vm.steps.date.set));
+                        results.push('ready: ' + vm.ready);
+
+                        return results.join(' | ');
                     }} catch(e) {{
-                        return 'error: ' + e.message;
+                        return 'error: ' + e.message + ' at ' + e.stack?.split('\\n')[1];
                     }}
                 }})()
             """)
-            logger.info(f"[Booker Chrono] Steps structure: {widget_result}")
-            await page.wait_for_timeout(2000)
+            logger.info(f"[Booker Chrono] Booking via scope: {booking_result}")
+            await page.wait_for_timeout(3000)
 
             # Cliquer le bon jour dans le calendrier Angular
             day_result = await page.evaluate(f"""
