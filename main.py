@@ -11,6 +11,7 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
 
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +19,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent / ".env")
+
+TZ_MONTREAL = ZoneInfo("America/Montreal")
+
+def get_today_montreal() -> date:
+    return datetime.now(TZ_MONTREAL).date()
 
 from database import (
     init_db, create_alert, get_all_alerts, get_active_alerts,
@@ -130,7 +136,7 @@ async def get_courses(
         results = [c for c in results if c["systeme"] == systeme]
     if apex is not None:
         results = [c for c in results if c["apex"] == apex]
-    today = date.today()
+    today = get_today_montreal()
     enriched = []
     for course in results:
         c = dict(course)
@@ -169,7 +175,7 @@ async def search_tee_times(
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Format de date invalide")
-    today_date = datetime.today().date()
+    today_date = get_today_montreal()
     jours_avant = (target_date - today_date).days
     if jours_avant < 0:
         raise HTTPException(status_code=400, detail="La date est dans le passé")
@@ -216,14 +222,20 @@ async def reserver(req: ReservationRequest):
 
 # ─── Routes : Session Chronogolf ───────────────────────
 @app.post("/api/chrono-capture")
+@app.post("/api/chrono-session")
 async def chrono_capture(request: Request):
-    """Reçoit la session Chronogolf depuis le bookmarklet."""
+    """Reçoit la session Chronogolf depuis le bookmarklet ou la page d'auth."""
     try:
-        data = await request.json()
+        data = await request.json() if request.headers.get("content-type") == "application/json" else {}
         session = data.get("session", "")
         cf_clearance = data.get("cf_clearance", "")
+        client_ip = request.client.host if request.client else "127.0.0.1"
+
         if not session:
-            return {"ok": False, "message": "Session vide"}
+            session_data = _chrono_sessions.get(client_ip)
+            if session_data:
+                return session_data
+            return {"valide": False, "ok": False, "message": "Aucune session capturée"}
 
         import httpx as _httpx
         email = ""
@@ -240,24 +252,25 @@ async def chrono_capture(request: Request):
         except Exception as e:
             logger.warning(f"[ChronoCapture] Verification: {e}")
 
-        client_ip = request.client.host
         _chrono_sessions[client_ip] = {
             "session": session,
             "cf_clearance": cf_clearance,
             "email": email,
             "valide": True,
+            "ok": True,
         }
         logger.info(f"[ChronoCapture] Capturée pour {client_ip}: {email}")
-        return {"ok": True, "email": email}
+        return {"ok": True, "valide": True, "email": email}
     except Exception as e:
         logger.error(f"[ChronoCapture] Erreur: {e}")
-        return {"ok": False, "message": str(e)}
+        return {"ok": False, "valide": False, "message": str(e)}
 
 
 @app.get("/api/chrono-session-get")
+@app.get("/api/chrono-session")
 async def chrono_session_get(request: Request):
     """Retourne la session Chronogolf capturée."""
-    client_ip = request.client.host
+    client_ip = request.client.host if request.client else "127.0.0.1"
     session_data = _chrono_sessions.get(client_ip)
     if not session_data:
         return {"valide": False, "message": "Aucune session capturée"}

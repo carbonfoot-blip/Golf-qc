@@ -7,6 +7,7 @@ import logging
 import os
 from datetime import datetime, date
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -20,6 +21,7 @@ from notifier import send_notification, format_alert_message
 from booker import reserver_depart
 
 logger = logging.getLogger(__name__)
+TZ_MONTREAL = ZoneInfo("America/Montreal")
 COURSES_PATH = Path(__file__).parent / "courses.json"
 scheduler = AsyncIOScheduler(timezone="America/Montreal")
 
@@ -34,10 +36,11 @@ async def check_all_alerts():
     if not alerts:
         return
     courses = load_courses()
-    now = datetime.now()
+    now = datetime.now(TZ_MONTREAL)
+    today_mtl = now.date()
     for alert in alerts:
         try:
-            if datetime.strptime(alert["date"], "%Y-%m-%d").date() < date.today():
+            if datetime.strptime(alert["date"], "%Y-%m-%d").date() < today_mtl:
                 await mark_alert_notified(alert["id"])
                 continue
         except Exception:

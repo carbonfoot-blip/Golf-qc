@@ -1,26 +1,24 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y \
-    libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-    libcups2 libxkbcommon0 libxcomposite1 \
-    libxdamage1 libxfixes3 libxrandr2 \
-    libgbm1 libasound2 libpango-1.0-0 \
-    libcairo2 libglib2.0-0 libx11-6 \
-    libxcb1 libxext6 fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
-# Installer les dépendances Python EN PREMIER (couche cachée par Docker)
+# Installer dépendances de base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installer les dépendances Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Installer Playwright une seule fois (couche cachée si requirements.txt ne change pas)
+# Installer Playwright Chromium et toutes les dépendances graphiques système requises
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN playwright install chromium
+RUN playwright install --with-deps chromium
 
-# Copier le code EN DERNIER (couche qui change souvent)
+# Copier le code de l'application
 COPY . .
 
-EXPOSE $PORT
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+ENV PORT=8000
+EXPOSE 8000
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

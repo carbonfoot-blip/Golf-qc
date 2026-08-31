@@ -30,6 +30,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+# Versions backup
 booker_v*.py 
 index_v*.html 
 alerts_v*.html 
@@ -38,7 +39,8 @@ scheduler_v*.py
 database_v*.py 
 notifier_v*.py 
 scraper_v*.py 
-courses*.json 
+courses_v*.json 
 chrono_*.py 
 chrono_*.html 
 *.db 
+ 

@@ -15,6 +15,7 @@ DB_PATH = os.getenv("DB_PATH", str(Path(__file__).parent / "alerts.db"))
 
 
 async def init_db():
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS alerts (

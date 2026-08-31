@@ -676,7 +676,7 @@ async def _reserver_chronogolf(terrain: dict, confirm_url: str, username: str, p
                     // Chercher aussi avec format H:MM
                     var heures_trouvees = [];
                     for (var el of all) {{
-                        if (el.children.length === 0 && /^\d{{1,2}}:\d{{2}}$/.test(el.textContent.trim())) {{
+                        if (el.children.length === 0 && /^\\d{{1,2}}:\\d{{2}}$/.test(el.textContent.trim())) {{
                             heures_trouvees.push(el.textContent.trim());
                         }}
                     }}

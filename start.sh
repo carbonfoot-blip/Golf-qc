@@ -39,7 +39,7 @@ if [ ! -f ".env" ]; then
   echo "📄 Fichier .env créé depuis .env.example"
 fi
 
-# 6. Démarrer le backend
+# 6. Démarrer le serveur
 echo ""
 echo "✅ Démarrage du serveur…"
 echo "   → Interface : http://127.0.0.1:8000"
@@ -50,5 +50,5 @@ echo "   Ctrl+C pour arrêter"
 echo "────────────────────────────────"
 echo ""
 
-cd backend
 python main.py
+
