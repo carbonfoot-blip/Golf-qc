@@ -934,7 +934,7 @@
 </div>
 
 <script>
-const API = 'https://golf-qc.up.railway.app/api';
+const API = window.location.origin + '/api';
 let allCourses = [];
 let searchResults = {};   // terrain_id -> { tee_times, statut }
 let pendingAlert = null;
