@@ -8,3 +8,4 @@ pydantic==2.7.1
 python-dotenv==1.0.1
 twilio==9.3.3
 playwright-stealth==2.0.3
+tzdata>=2024.1

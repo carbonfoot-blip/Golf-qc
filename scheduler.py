@@ -21,9 +21,16 @@ from notifier import send_notification, format_alert_message
 from booker import reserver_depart
 
 logger = logging.getLogger(__name__)
-TZ_MONTREAL = ZoneInfo("America/Montreal")
+
+try:
+    from zoneinfo import ZoneInfo
+    TZ_MONTREAL = ZoneInfo("America/Montreal")
+except Exception:
+    import datetime as _dt
+    TZ_MONTREAL = _dt.timezone(_dt.timedelta(hours=-4))
+
 COURSES_PATH = Path(__file__).parent / "courses.json"
-scheduler = AsyncIOScheduler(timezone="America/Montreal")
+scheduler = AsyncIOScheduler(timezone=TZ_MONTREAL)
 
 
 def load_courses() -> dict:

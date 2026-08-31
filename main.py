@@ -21,7 +21,12 @@ from pydantic import BaseModel, field_validator
 
 load_dotenv(Path(__file__).parent / ".env")
 
-TZ_MONTREAL = ZoneInfo("America/Montreal")
+try:
+    from zoneinfo import ZoneInfo
+    TZ_MONTREAL = ZoneInfo("America/Montreal")
+except Exception:
+    import datetime as _dt
+    TZ_MONTREAL = _dt.timezone(_dt.timedelta(hours=-4))
 
 def get_today_montreal() -> date:
     return datetime.now(TZ_MONTREAL).date()
