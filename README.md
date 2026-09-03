@@ -2,6 +2,17 @@
 
 Application complète de recherche, surveillance et réservation automatisée de départs de golf au Québec.
 
+## 🔗 Accès rapide aux URLs de l'application
+
+- **Page principale (Recherche & Réservation)** : [http://127.0.0.1:8000/](http://127.0.0.1:8000/)
+- **Mes Alertes** : [http://127.0.0.1:8000/alerts](http://127.0.0.1:8000/alerts)
+- **Documentation API (Swagger)** : [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **Dépôt GitHub** : [https://github.com/carbonfoot-blip/Golf-qc](https://github.com/carbonfoot-blip/Golf-qc)
+
+*(Si déployé sur le cloud tel que Railway, Render ou Fly.io, remplacez `http://127.0.0.1:8000` par le nom de domaine HTTPS fourni par votre hébergeur)*
+
+---
+
 ## ✨ Fonctionnalités
 
 - **Recherche en temps réel** de départs disponibles par région, date, plage horaire et nombre de joueurs (1 à 4)
@@ -95,4 +106,3 @@ Voici les options recommandées pour mettre l'application en ligne gratuitement 
 | `GET` | `/api/alerts/{id}/logs`| Historique des vérifications effectuées |
 | `POST` | `/api/check/{id}` | Forcer une vérification immédiate sans attendre le scheduler |
 | `POST` | `/api/reserver` | Déclencher une réservation automatisée |
-
